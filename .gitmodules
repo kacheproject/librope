@@ -1,0 +1,3 @@
+[submodule "makru/plugins/makru_langc"]
+	path = makru/plugins/makru_langc
+	url = https://gitlab.com/jinwa/makru_langc.git
