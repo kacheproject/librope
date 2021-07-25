@@ -66,15 +66,15 @@ void rwtp_frame_reset(rwtp_frame *self);
 rwtp_frame *rwtp_frame_pack_frames(const rwtp_frame *self);
 rwtp_frame *rwtp_frame_unpack_frames(const rwtp_frame *self);
 
-rwtp_frame *rwtp_frame_last_of(const rwtp_frame *self);
+rwtp_frame *rwtp_frame_last_of(rwtp_frame *self);
 
 rwtp_frame *rwtp_frames_chain(rwtp_frame frames[], size_t frames_n);
 
-rwtp_frame *rwtp_frame_clone(rwtp_frame *self);
+rwtp_frame *rwtp_frame_clone(const rwtp_frame *self);
 rwtp_frame *rwtp_frame_clone_all(rwtp_frame *self);
 
 /* Return false if self is NULL or self->iovec_len != size, and true otherwise. */
-bool *rwtp_frame_check_size_fixed(rwtp_frame *self, size_t size);
+bool rwtp_frame_check_size_fixed(rwtp_frame *self, size_t size);
 
 typedef struct rwtp_crypto_save {
     rwtp_frame *pk;
@@ -173,7 +173,7 @@ Caller own the value, they should apply rwtp_frame_destroy* on the frames when t
 */
 rwtp_session_read_result rwtp_session_read(rwtp_session *self, const rwtp_frame *raw_single);
 
-rwtp_frame *rwtp_session_send(rwtp_session *self, const rwtp_frame *raw);
+rwtp_frame *rwtp_session_send(rwtp_session *self, rwtp_frame *raw);
 
 rwtp_frame *rwtp_session_send_set_pub_key(rwtp_session *self, const rwtp_frame *self_private_key, const rwtp_frame *iv);
 

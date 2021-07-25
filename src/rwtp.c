@@ -11,7 +11,7 @@
 /* A wrapper around strtoll and strtol, automatically choose correct one for int64_t. */
 static int64_t strtoint64 (const char *restrict str, char **restrict str_end, int base){
     static const int int64_nbytes = sizeof(int64_t);
-    static_assert(int64_nbytes == sizeof(long long) || int64_nbytes == sizeof(long), "strtoint64() requires either long long or long have exact same size to int64_t.");
+    assert(int64_nbytes == sizeof(long long) || int64_nbytes == sizeof(long));
 
     if (int64_nbytes == sizeof (long long)){
         return strtoll(str, str_end, base);
@@ -109,10 +109,10 @@ rwtp_frame *rwtp_frame_pack_frames(const rwtp_frame *self) {
     msgpack_packer_init(&packer, &sbuf, msgpack_sbuffer_write);
 
     {
-        rwtp_frame *current = self;
+        const rwtp_frame *current = self;
         do {
             msgpack_pack_bin(&packer, current->iovec_len);
-            msgpack_pack_bin(&packer, current->iovec_data);
+            msgpack_pack_bin_body(&packer, current->iovec_data, current->iovec_len);
         } while (current = self->frame_next);
     }
 
@@ -178,7 +178,7 @@ rwtp_frame *rwtp_frame_unpack_frames(const rwtp_frame *self) {
     return result_head;
 }
 
-rwtp_frame *rwtp_frame_last_of(const rwtp_frame *self) {
+rwtp_frame *rwtp_frame_last_of(rwtp_frame *self) {
     return self->frame_next ? rwtp_frame_last_of(self->frame_next) : self;
 }
 
@@ -190,7 +190,7 @@ rwtp_frame *rwtp_frame_encrypt_single(const rwtp_frame *self,
         return NULL;
     }
     if (crypto_box_easy(result->iovec_data, self->iovec_data, self->iovec_len,
-                        save->nonce, save->pk->iovec_data,
+                        save->nonce->iovec_data, save->pk->iovec_data,
                         save->sk->iovec_data)) {
         rwtp_frame_destroy(result);
         return NULL;
@@ -206,7 +206,7 @@ rwtp_frame *rwtp_frame_decrypt_single(const rwtp_frame *self,
         return NULL;
     }
     if (crypto_box_open_easy(result->iovec_data, self->iovec_data,
-                             self->iovec_len, save->nonce, save->pk->iovec_data,
+                             self->iovec_len, save->nonce->iovec_data, save->pk->iovec_data,
                              save->sk->iovec_data)) {
         rwtp_frame_destroy(result);
         return NULL;
@@ -221,7 +221,7 @@ rwtp_frame *rwtp_frames_chain(rwtp_frame frames[], size_t frames_n) {
     return frames;
 }
 
-static rwtp_frame *rwtp_session_pkm_encrypt_single(rwtp_session *self,
+static rwtp_frame *rwtp_session_pkm_encrypt_single(const rwtp_session *self,
                                                    const rwtp_frame *f) {
     rwtp_crypto_save csave = {
         .pk = self->remote_public_key->iovec_data,
@@ -234,7 +234,7 @@ static rwtp_frame *rwtp_session_pkm_encrypt_single(rwtp_session *self,
     return result;
 }
 
-static rwtp_frame *rwtp_session_skm_encrypt_single(rwtp_session *self,
+static rwtp_frame *rwtp_session_skm_encrypt_single(const rwtp_session *self,
                                                    const rwtp_frame *f) {
     rwtp_frame *result = rwtp_frame_new(
         f->iovec_len + crypto_secretstream_xchacha20poly1305_ABYTES, NULL);
@@ -251,7 +251,7 @@ static rwtp_frame *rwtp_session_skm_encrypt_single(rwtp_session *self,
 }
 
 /* Encrypt single rwtp_frame. Caller own return value. */
-static rwtp_frame *rwtp_session_encrypt_single(rwtp_session *self,
+static rwtp_frame *rwtp_session_encrypt_single(const rwtp_session *self,
                                                const rwtp_frame *f) {
     if (self->remote_public_key) {
         return rwtp_session_pkm_encrypt_single(self, f);
@@ -324,7 +324,7 @@ rwtp_session_read_result rwtp_session_read(rwtp_session *self, const rwtp_frame 
             if (!(pub_keyf=opt_key_frame->frame_next) || !(ivf=pub_keyf->frame_next)){
                 rwtp_frame_destroy_all(frames);
                 return (struct rwtp_session_read_result){-1};
-            } else if (pub_keyf->iovec_len != crypto_box_PUBLICKEYBYTES || ivf != crypto_box_NONCEBYTES){
+            } else if (pub_keyf->iovec_len != crypto_box_PUBLICKEYBYTES || ivf->iovec_len != crypto_box_NONCEBYTES){
                 rwtp_frame_destroy_all(frames);
                 return (struct rwtp_session_read_result){-1};
             }
@@ -390,10 +390,10 @@ rwtp_session_read_result rwtp_session_read(rwtp_session *self, const rwtp_frame 
     }
 }
 
-rwtp_frame *rwtp_session_send(rwtp_session *self, const rwtp_frame *raw){
+rwtp_frame *rwtp_session_send(rwtp_session *self, rwtp_frame *raw){
     assert(self->secret_key || self->remote_public_key);
     rwtp_frame head = {
-        .iovec_data = &RWTP_DATA,
+        .iovec_data = (uint8_t*)&RWTP_DATA,
         .iovec_len = sizeof(uint8_t),
         .frame_next = raw,
     };
@@ -411,7 +411,7 @@ rwtp_frame *rwtp_session_send_set_sec_key(rwtp_session *self, const rwtp_frame *
     assert(!self->remote_public_key); // Should not in public-key mode
     assert(self->secret_key->iovec_len == crypto_secretstream_xchacha20poly1305_KEYBYTES);
 
-    secret_key = rwtp_frame_clone(secret_key);
+    rwtp_frame *dup_secret_key = rwtp_frame_clone((rwtp_frame*)secret_key);
 
     self->nonce_or_header = rwtp_frame_new(crypto_secretstream_xchacha20poly1305_HEADERBYTES, NULL);
     if (!self->nonce_or_header){
@@ -431,9 +431,9 @@ rwtp_frame *rwtp_session_send_set_sec_key(rwtp_session *self, const rwtp_frame *
     }
 
     rwtp_frame message[4] = {
-        {&RWTP_SETOPT, sizeof(uint8_t)},
-        {&RWTP_OPTS_SECKEY, sizeof(uint8_t)},
-        *secret_key,
+        {(uint8_t*)&RWTP_SETOPT, sizeof(uint8_t)},
+        {(uint8_t*)&RWTP_OPTS_SECKEY, sizeof(uint8_t)},
+        *dup_secret_key,
         *(self->nonce_or_header),
     };
     rwtp_frames_chain(message, 4);
@@ -441,7 +441,7 @@ rwtp_frame *rwtp_session_send_set_sec_key(rwtp_session *self, const rwtp_frame *
     rwtp_frame *result = rwtp_session_encrypt_single(self, blk);
     rwtp_frame_destroy(blk);
 
-    self->secret_key = secret_key;
+    self->secret_key = dup_secret_key;
     return result;
 }
 
@@ -454,12 +454,12 @@ rwtp_frame *rwtp_session_send_set_pub_key(rwtp_session *self,
     assert(iv->iovec_len == crypto_box_NONCEBYTES);
 
     unsigned char pk[crypto_box_PUBLICKEYBYTES];
-    crypto_scalarmult_base(pk, self_private_key);
+    crypto_scalarmult_base(pk, self_private_key->iovec_data);
     rwtp_frame pk_frame = {
         .iovec_data = pk,
         .iovec_len = crypto_box_PUBLICKEYBYTES,
     };
-    rwtp_frame message[4] = {{&RWTP_SETOPT, sizeof(uint8_t)},{&RWTP_OPTS_PUBKEY, sizeof(uint8_t)}, pk_frame, *iv};
+    rwtp_frame message[4] = {{(uint8_t*)&RWTP_SETOPT, sizeof(uint8_t)},{(uint8_t*)&RWTP_OPTS_PUBKEY, sizeof(uint8_t)}, pk_frame, *iv};
     rwtp_frames_chain(message, 4);
     rwtp_frame *blk = rwtp_frame_pack_frames(message);
     rwtp_frame *result;
@@ -470,8 +470,8 @@ rwtp_frame *rwtp_session_send_set_pub_key(rwtp_session *self,
     }
 
     // After message "sent", we update options
-    self->self_private_key = self_private_key;
-    self->nonce_or_header = iv;
+    self->self_private_key = rwtp_frame_clone(self_private_key);
+    self->nonce_or_header = rwtp_frame_clone(iv);
 
     return result;
 }
@@ -484,8 +484,8 @@ rwtp_frame *rwtp_session_send_set_time(const rwtp_session *self, int64_t time){
         .iovec_len = sizeof(uint64_t),
     };
     rwtp_frame message[3] = {
-        {&RWTP_SETOPT, sizeof(uint8_t)},
-        {&RWTP_OPTS_TIME, sizeof(uint8_t)},
+        {(uint8_t*)&RWTP_SETOPT, sizeof(uint8_t)},
+        {(uint8_t*)&RWTP_OPTS_TIME, sizeof(uint8_t)},
         timef,
     };
     rwtp_frames_chain(message, 3);
@@ -536,7 +536,7 @@ rwtp_frame *rwtp_frame_decrypt_single_seal(const rwtp_frame *self,
     return NULL;
 }
 
-rwtp_frame *rwtp_frame_clone(rwtp_frame *self){
+rwtp_frame *rwtp_frame_clone(const rwtp_frame *self){
     rwtp_frame *copy = rwtp_frame_new(self->iovec_len, self->frame_next);
     memcpy(copy->iovec_data, self->iovec_data, self->iovec_len);
     return copy;
@@ -552,7 +552,7 @@ rwtp_frame *rwtp_frame_clone_all(rwtp_frame *self){
     }
 }
 
-bool *rwtp_frame_check_size_fixed(rwtp_frame *self, size_t size){
+bool rwtp_frame_check_size_fixed(rwtp_frame *self, size_t size){
     if (self){
         return self->iovec_len == size;
     } else {
