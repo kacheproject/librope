@@ -182,3 +182,15 @@ rwtp_frame *rwtp_session_send_set_sec_key(rwtp_session *self, const rwtp_frame *
 rwtp_frame *rwtp_session_send_set_time(const rwtp_session *self, int64_t time);
 
 void rwtp_session_deinit(rwtp_session *self);
+
+/* Return true if session is in seal mode, false otherwise. */
+bool rwtp_session_check_seal_mode(rwtp_session *self);
+
+/* Return true if session is in public-key mode, false otherwise. */
+bool rwtp_session_check_public_key_mode(rwtp_session *self);
+
+/* Return true if session is in secret-key mode, false otherwise. */
+bool rwtp_session_check_secret_key_mode(rwtp_session *self);
+
+/* Return true if session is in fully functional(in public-key or secret-key mode), false otherwise. */
+bool rwtp_session_check_complete_mode(rwtp_session *self);

@@ -391,7 +391,6 @@ rwtp_session_read_result rwtp_session_read(rwtp_session *self, const rwtp_frame 
 }
 
 rwtp_frame *rwtp_session_send(rwtp_session *self, rwtp_frame *raw){
-    assert(self->secret_key || self->remote_public_key);
     rwtp_frame head = {
         .iovec_data = (uint8_t*)&RWTP_DATA,
         .iovec_len = sizeof(uint8_t),
@@ -408,7 +407,7 @@ rwtp_frame *rwtp_session_send(rwtp_session *self, rwtp_frame *raw){
 
 rwtp_frame *rwtp_session_send_set_sec_key(rwtp_session *self, const rwtp_frame *secret_key){
     assert(self->network_key);
-    assert(!self->remote_public_key); // Should not in public-key mode
+    assert(!rwtp_session_check_public_key_mode(self)); // Should not in public-key mode
     assert(self->secret_key->iovec_len == crypto_secretstream_xchacha20poly1305_KEYBYTES);
 
     rwtp_frame *dup_secret_key = rwtp_frame_clone((rwtp_frame*)secret_key);
@@ -449,7 +448,7 @@ rwtp_frame *rwtp_session_send_set_pub_key(rwtp_session *self,
                                           const rwtp_frame *self_private_key,
                                           const rwtp_frame *iv) {
     assert(self->network_key);
-    assert(!self->secret_key); // Should not in secret-key mode
+    assert(!rwtp_session_check_secret_key_mode(self)); // Should not in secret-key mode
     assert(self_private_key->iovec_len == crypto_box_SECRETKEYBYTES);
     assert(iv->iovec_len == crypto_box_NONCEBYTES);
 
@@ -579,4 +578,20 @@ void rwtp_session_deinit(rwtp_session *self){
     if(self->_state){
         free(self->_state);
     }
+}
+
+bool rwtp_session_check_seal_mode(rwtp_session *self){
+    return self->network_key && !(self->remote_public_key || self->secret_key);
+}
+
+bool rwtp_session_check_public_key_mode(rwtp_session *self){
+    return !!self->remote_public_key;
+}
+
+bool rwtp_session_check_secret_key_mode(rwtp_session *self){
+    return !!self->secret_key;
+}
+
+bool rwtp_session_check_complete_mode(rwtp_session *self){
+    return rwtp_session_check_public_key_mode(self) || rwtp_session_check_secret_key_mode(self);
 }
