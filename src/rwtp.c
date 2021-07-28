@@ -15,7 +15,7 @@ static int64_t strtoint64 (const char *restrict str, char **restrict str_end, in
 
     if (int64_nbytes == sizeof (long long)){
         return strtoll(str, str_end, base);
-    } else if (int64_nbytes == sizeof (long)){
+    } else {
         return strtol(str, str_end, base);
     }
 }
@@ -24,7 +24,7 @@ static int64_t strtoint64 (const char *restrict str, char **restrict str_end, in
 static char *int64tostr(int64_t n){
     // TODO: a new version without the use of asprintf
     char *str;
-    asprintf(&str, "%PRId64", n);
+    asprintf(&str, "%jd", n);
     return str;
 }
 
@@ -62,7 +62,7 @@ void rwtp_frame_deinit(rwtp_frame *self) {
 
 void rwtp_frame_deinit_all(rwtp_frame *self) {
     rwtp_frame *next = self;
-    while (self = next) {
+    while ((self = next)) {
         next = self->frame_next;
         rwtp_frame_deinit(self);
     }
@@ -88,7 +88,7 @@ void rwtp_frame_destroy(rwtp_frame *self) {
 void rwtp_frame_destroy_all(rwtp_frame *self) {
     rwtp_frame_deinit_all(self);
     rwtp_frame *next = self;
-    while (self = next) {
+    while ((self = next)) {
         next = self->frame_next;
         free(self);
     }
@@ -113,7 +113,7 @@ rwtp_frame *rwtp_frame_pack_frames(const rwtp_frame *self) {
         do {
             msgpack_pack_bin(&packer, current->iovec_len);
             msgpack_pack_bin_body(&packer, current->iovec_data, current->iovec_len);
-        } while (current = self->frame_next);
+        } while ((current = self->frame_next));
     }
 
     rwtp_frame *result = rwtp_frame_new(sbuf.size, NULL);
@@ -145,7 +145,7 @@ rwtp_frame *rwtp_frame_unpack_frames(const rwtp_frame *self) {
         unpacking_result = msgpack_unpacker_next(&unpacker, &unpacked);
 
         if (unpacking_result == MSGPACK_UNPACK_SUCCESS) {
-            if (!unpacked.data.type != MSGPACK_OBJECT_BIN) {
+            if (unpacked.data.type != MSGPACK_OBJECT_BIN) {
                 msgpack_unpacker_destroy(&unpacker);
                 return NULL;
             }
@@ -488,7 +488,7 @@ rwtp_frame *rwtp_session_send_set_time(const rwtp_session *self, int64_t time){
         timef,
     };
     rwtp_frames_chain(message, 3);
-    rwtp_frame *blk = rwtp_frame_pack_frames(blk);
+    rwtp_frame *blk = rwtp_frame_pack_frames(message);
     free(timestr);
     if (!blk){
         return NULL;
