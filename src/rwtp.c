@@ -559,3 +559,24 @@ bool rwtp_frame_check_size_fixed(rwtp_frame *self, size_t size){
         return false;
     }
 }
+
+void rwtp_session_deinit(rwtp_session *self){
+    if (self->network_key){
+        rwtp_frame_destroy(self->network_key);
+    }
+    if (self->nonce_or_header){
+        rwtp_frame_destroy(self->nonce_or_header);
+    }
+    if (self->remote_public_key){
+        rwtp_frame_destroy(self->remote_public_key);
+    }
+    if(self->secret_key){
+        rwtp_frame_destroy(self->secret_key);
+    }
+    if(self->self_private_key){
+        rwtp_frame_destroy(self->self_private_key);
+    }
+    if(self->_state){
+        free(self->_state);
+    }
+}
