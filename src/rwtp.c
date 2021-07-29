@@ -114,9 +114,8 @@ rwtp_frame *rwtp_frame_pack_frames(const rwtp_frame *self) {
         do {
             msgpack_pack_bin(&packer, current->iovec_len);
             msgpack_pack_bin_body(&packer, current->iovec_data, current->iovec_len);
-        } while ((current = self->frame_next));
+        } while ((current = current->frame_next));
     }
-
     rwtp_frame *result = rwtp_frame_new(sbuf.size, NULL);
     memcpy(result->iovec_data, sbuf.data, sbuf.size);
     msgpack_sbuffer_release(&sbuf);
