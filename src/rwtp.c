@@ -74,7 +74,7 @@ rwtp_frame *rwtp_frame_new(size_t iovec_len, rwtp_frame *frame_next) {
     if (!new_frame) {
         return NULL;
     }
-    if (!rwtp_frame_init(new_frame, iovec_len, frame_next)) {
+    if (rwtp_frame_init(new_frame, iovec_len, frame_next)) {
         free(new_frame);
         return NULL;
     }
