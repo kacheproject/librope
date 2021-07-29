@@ -499,6 +499,21 @@ rwtp_frame *rwtp_session_send_set_time(const rwtp_session *self, int64_t time){
     return result;
 }
 
+rwtp_frame *rwtp_session_send_ask_option(rwtp_session *self, uint8_t option){
+    rwtp_frame message[2] = {
+        {(uint8_t*)&RWTP_ASKOPT, sizeof(uint8_t)},
+        {(uint8_t*)&option, sizeof(uint8_t)},
+    };
+    rwtp_frames_chain(message, 2);
+    rwtp_frame *blk = rwtp_frame_pack_frames(message);
+    if (!blk){
+        return NULL;
+    }
+    rwtp_frame *result = rwtp_session_encrypt_single(self, blk);
+    rwtp_frame_destroy(blk);
+    return result;
+}
+
 rwtp_frame *rwtp_frame_encrypt_single_seal(const rwtp_frame *self,
                                            const rwtp_crypto_save *save) {
     rwtp_frame *result =

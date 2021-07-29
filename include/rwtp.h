@@ -182,6 +182,8 @@ rwtp_frame *rwtp_session_send_set_sec_key(rwtp_session *self, const rwtp_frame *
 
 rwtp_frame *rwtp_session_send_set_time(const rwtp_session *self, int64_t time);
 
+rwtp_frame *rwtp_session_send_ask_option(rwtp_session *self, uint8_t opt);
+
 void rwtp_session_deinit(rwtp_session *self);
 
 /* Return true if session is in seal mode, false otherwise. */
