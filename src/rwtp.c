@@ -124,6 +124,7 @@ rwtp_frame *rwtp_frame_pack_frames(const rwtp_frame *self) {
 
 rwtp_frame *rwtp_frame_unpack_frames(const rwtp_frame *self) {
     rwtp_frame *result_head, *result_current, *result_last;
+    result_last = result_current = result_head = NULL;
     msgpack_unpacker unpacker;
     if (!msgpack_unpacker_init(&unpacker, 128)) {
         return NULL;
