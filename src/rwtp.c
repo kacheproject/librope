@@ -519,13 +519,13 @@ rwtp_frame *rwtp_frame_encrypt_single_seal(const rwtp_frame *self,
     rwtp_frame *result =
         rwtp_frame_new(crypto_box_SEALBYTES + self->iovec_len, NULL);
     if (result) {
-        unsigned char pk[crypto_box_PUBLICKEYBYTES];
+        unsigned char publick[crypto_box_PUBLICKEYBYTES] = {};
         if (!save->pk) {
-            crypto_scalarmult_base(pk, save->pk->iovec_data);
+            crypto_scalarmult_base(publick, save->sk->iovec_data);
         }
         if (crypto_box_seal(result->iovec_data, self->iovec_data,
                             self->iovec_len,
-                            save->pk ? save->pk->iovec_data : pk)) {
+                            save->pk ? save->pk->iovec_data : publick)) {
             rwtp_frame_destroy(result);
             return NULL;
         }
