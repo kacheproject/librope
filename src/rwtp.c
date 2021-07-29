@@ -216,7 +216,7 @@ rwtp_frame *rwtp_frame_decrypt_single(const rwtp_frame *self,
 }
 
 rwtp_frame *rwtp_frames_chain(rwtp_frame frames[], size_t frames_n) {
-    for (; frames_n > 0; frames_n--) {
+    for (; frames_n >= 2; frames_n--) {
         frames[frames_n - 2].frame_next = &(frames[frames_n - 1]);
     }
     return frames;
