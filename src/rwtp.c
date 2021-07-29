@@ -597,7 +597,7 @@ bool rwtp_session_check_complete_mode(rwtp_session *self){
 }
 
 rwtp_frame *rwtp_frame_gen_private_key(){
-    char privatek[crypto_box_SECRETKEYBYTES], pubk[crypto_box_PUBLICKEYBYTES];
+    unsigned char privatek[crypto_box_SECRETKEYBYTES], pubk[crypto_box_PUBLICKEYBYTES];
     if(crypto_box_keypair(pubk, privatek)){
         return NULL;
     }
@@ -612,7 +612,7 @@ rwtp_frame *rwtp_frame_gen_network_key(){
 }
 
 rwtp_frame *rwtp_frame_gen_secret_key(){
-    char sk[crypto_secretstream_xchacha20poly1305_KEYBYTES];
+    unsigned char sk[crypto_secretstream_xchacha20poly1305_KEYBYTES];
     crypto_secretstream_xchacha20poly1305_keygen(sk);
     rwtp_frame *result = rwtp_frame_new(crypto_secretstream_xchacha20poly1305_KEYBYTES, NULL);
     if (!result) return NULL;
