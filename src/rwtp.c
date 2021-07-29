@@ -185,6 +185,9 @@ rwtp_frame *rwtp_frame_last_of(rwtp_frame *self) {
 
 rwtp_frame *rwtp_frame_encrypt_single(const rwtp_frame *self,
                                       const rwtp_crypto_save *save) {
+    assert(save->nonce->iovec_len == crypto_box_NONCEBYTES);
+    assert(save->pk->iovec_len == crypto_box_PUBLICKEYBYTES);
+    assert(save->sk->iovec_len == crypto_box_SECRETKEYBYTES);
     rwtp_frame *result =
         rwtp_frame_new(crypto_box_MACBYTES + self->iovec_len, NULL);
     if (!result) {
@@ -201,6 +204,9 @@ rwtp_frame *rwtp_frame_encrypt_single(const rwtp_frame *self,
 
 rwtp_frame *rwtp_frame_decrypt_single(const rwtp_frame *self,
                                       const rwtp_crypto_save *save) {
+    assert(save->nonce->iovec_len == crypto_box_NONCEBYTES);
+    assert(save->pk->iovec_len == crypto_box_PUBLICKEYBYTES);
+    assert(save->sk->iovec_len == crypto_box_SECRETKEYBYTES);
     rwtp_frame *result =
         rwtp_frame_new(self->iovec_len - crypto_box_MACBYTES, NULL);
     if (!result) {
