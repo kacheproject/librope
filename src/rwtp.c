@@ -601,7 +601,7 @@ bool rwtp_session_check_seal_mode(rwtp_session *self){
 }
 
 bool rwtp_session_check_public_key_mode(rwtp_session *self){
-    return !!self->remote_public_key;
+    return self->remote_public_key && self->self_private_key;
 }
 
 bool rwtp_session_check_secret_key_mode(rwtp_session *self){
