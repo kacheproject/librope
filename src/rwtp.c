@@ -43,6 +43,7 @@ int rwtp_init() {
 
 int rwtp_frame_init(rwtp_frame *self, size_t iovec_len,
                     rwtp_frame *frame_next) {
+    rwtp_frame_reset(self);
     if (iovec_len > 0) {
         self->iovec_len = iovec_len;
         self->iovec_data = malloc(iovec_len);
