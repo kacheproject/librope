@@ -260,6 +260,7 @@ static rwtp_frame *rwtp_session_encrypt_single(const rwtp_session *self,
         return rwtp_session_skm_encrypt_single(self, f);
     } else {
         // in neither public-key mode nor secret-key mode, use seal boxes
+        assert(self->network_key);
         rwtp_crypto_save csave = {.sk = self->network_key};
         return rwtp_frame_encrypt_single_seal(f, &csave);
     }
@@ -290,6 +291,7 @@ static rwtp_frame *rwtp_session_decrypt_single(rwtp_session *self,
         }
         return result;
     } else {
+        assert(self->network_key);
         rwtp_crypto_save csave = {.sk = self->network_key};
         rwtp_frame *result = rwtp_frame_decrypt_single_seal(f, &csave);
         return result;
@@ -407,7 +409,6 @@ rwtp_frame *rwtp_session_send(rwtp_session *self, rwtp_frame *raw){
 }
 
 rwtp_frame *rwtp_session_send_set_sec_key(rwtp_session *self, const rwtp_frame *secret_key){
-    assert(self->network_key);
     assert(!rwtp_session_check_public_key_mode(self)); // Should not in public-key mode
     assert(self->secret_key->iovec_len == crypto_secretstream_xchacha20poly1305_KEYBYTES);
 
@@ -448,7 +449,6 @@ rwtp_frame *rwtp_session_send_set_sec_key(rwtp_session *self, const rwtp_frame *
 rwtp_frame *rwtp_session_send_set_pub_key(rwtp_session *self,
                                           const rwtp_frame *self_private_key,
                                           const rwtp_frame *iv) {
-    assert(self->network_key);
     assert(!rwtp_session_check_secret_key_mode(self)); // Should not in secret-key mode
     assert(self_private_key->iovec_len == crypto_box_SECRETKEYBYTES);
     assert(iv->iovec_len == crypto_box_NONCEBYTES);
@@ -597,7 +597,7 @@ void rwtp_session_deinit(rwtp_session *self){
 }
 
 bool rwtp_session_check_seal_mode(rwtp_session *self){
-    return self->network_key && !(self->remote_public_key || self->secret_key);
+    return self->network_key && !rwtp_session_check_complete_mode(self);
 }
 
 bool rwtp_session_check_public_key_mode(rwtp_session *self){
