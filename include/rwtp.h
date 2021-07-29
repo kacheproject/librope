@@ -199,3 +199,4 @@ bool rwtp_session_check_complete_mode(rwtp_session *self);
 rwtp_frame *rwtp_frame_gen_network_key();
 rwtp_frame *rwtp_frame_gen_private_key();
 rwtp_frame *rwtp_frame_gen_secret_key();
+rwtp_frame *rwtp_frame_gen_public_key_mode_iv();

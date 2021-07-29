@@ -620,3 +620,12 @@ rwtp_frame *rwtp_frame_gen_secret_key(){
     memcpy(result->iovec_data, sk, result->iovec_len);
     return result;
 }
+
+rwtp_frame *rwtp_frame_gen_public_key_mode_iv(){
+    rwtp_frame *result = rwtp_frame_new(crypto_box_NONCEBYTES, NULL);
+    if (!result){
+        return NULL;
+    }
+    randombytes_buf(result->iovec_data, result->iovec_len);
+    return result;
+}
