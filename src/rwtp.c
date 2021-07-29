@@ -231,9 +231,9 @@ rwtp_frame *rwtp_frames_chain(rwtp_frame frames[], size_t frames_n) {
 static rwtp_frame *rwtp_session_pkm_encrypt_single(const rwtp_session *self,
                                                    const rwtp_frame *f) {
     rwtp_crypto_save csave = {
-        .pk = self->remote_public_key->iovec_data,
-        .sk = self->self_private_key->iovec_data,
-        .nonce = self->nonce_or_header->iovec_data,
+        .pk = self->remote_public_key,
+        .sk = self->self_private_key,
+        .nonce = self->nonce_or_header,
     };
     rwtp_frame *result = rwtp_frame_encrypt_single(f, &csave);
     sodium_increment(self->nonce_or_header->iovec_data,
@@ -260,13 +260,13 @@ static rwtp_frame *rwtp_session_skm_encrypt_single(const rwtp_session *self,
 /* Encrypt single rwtp_frame. Caller own return value. */
 static rwtp_frame *rwtp_session_encrypt_single(const rwtp_session *self,
                                                const rwtp_frame *f) {
-    if (self->remote_public_key) {
+    if (rwtp_session_check_public_key_mode(self)) {
         return rwtp_session_pkm_encrypt_single(self, f);
-    } else if (self->secret_key) {
+    } else if (rwtp_session_check_secret_key_mode(self)) {
         return rwtp_session_skm_encrypt_single(self, f);
     } else {
         // in neither public-key mode nor secret-key mode, use seal boxes
-        assert(self->network_key);
+        assert(rwtp_session_check_seal_mode(self));
         rwtp_crypto_save csave = {.sk = self->network_key};
         return rwtp_frame_encrypt_single_seal(f, &csave);
     }
@@ -275,18 +275,18 @@ static rwtp_frame *rwtp_session_encrypt_single(const rwtp_session *self,
 /* Decrypt single rwtp_frame. Caller own return value. */
 static rwtp_frame *rwtp_session_decrypt_single(rwtp_session *self,
                                                const rwtp_frame *f) {
-    if (self->remote_public_key) {
+    if (rwtp_session_check_public_key_mode(self)) {
         unsigned char msg_nonce[crypto_box_NONCEBYTES];
         rwtp_frame msg_nonce_frame = {.iovec_data = msg_nonce,
                                       .iovec_len = crypto_box_NONCEBYTES};
         rwtp_crypto_save csave = {
-            .pk = self->remote_public_key->iovec_data,
-            .sk = self->self_private_key->iovec_data,
+            .pk = self->remote_public_key,
+            .sk = self->self_private_key,
             .nonce = &msg_nonce_frame,
         };
         rwtp_frame *result = rwtp_frame_decrypt_single(f, &csave);
         return result;
-    } else if (self->secret_key) {
+    } else if (rwtp_session_check_secret_key_mode(self)) {
         rwtp_frame *result = rwtp_frame_new(
             f->iovec_len - crypto_secretstream_xchacha20poly1305_ABYTES, NULL);
         if (crypto_secretstream_xchacha20poly1305_pull(
@@ -297,7 +297,7 @@ static rwtp_frame *rwtp_session_decrypt_single(rwtp_session *self,
         }
         return result;
     } else {
-        assert(self->network_key);
+        assert(rwtp_session_check_seal_mode(self));
         rwtp_crypto_save csave = {.sk = self->network_key};
         rwtp_frame *result = rwtp_frame_decrypt_single_seal(f, &csave);
         return result;
