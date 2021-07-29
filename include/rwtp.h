@@ -123,7 +123,7 @@ rwtp_frame *rwtp_frame_decrypt_single_seal(const rwtp_frame *self, const rwtp_cr
 */
 
 /* Session for a RWTP Connection. 
-* A RWTP Connection have two kinds of mode: public-key or secret-key.
+* A RWTP Connection have three kinds of mode: seal, public-key or secret-key.
 *
 * Public-key mode encrypt plain text or decrypt secret text with calculated shared secret key from local private key and remote public key.
 * This mode use Xsalsa20-Poly1305MAC with X25519, and fits interactive communications. Provides:
@@ -139,8 +139,9 @@ rwtp_frame *rwtp_frame_decrypt_single_seal(const rwtp_frame *self, const rwtp_cr
 * - Message order detection
 * Non-null value of remote_secret_key states secret-key mode.
 * 
-* It's possible to connect a member of public-key mode and a member of secret-key mode,
-but one session could not be public-key and secret-key mode in a moment.
+* Seal mode works just like public-key mode, but using random private key each time encrypting with network key as public key.
+* This mode will be activated before entering public-key or secret-key mode, to provide a secure way to exchanging infomation (only when the network key exchanged in secure).
+* Forward & backward security could not be ensured in this mode, sending application messages is not recommended.
 *
 * RWTP (Rope Wire Transfer Protocol) is a role-less secure transfering protocol,
 uses a pre-shared long-term key (named network key) to protect infomation during "handshake".
@@ -194,3 +195,7 @@ bool rwtp_session_check_secret_key_mode(rwtp_session *self);
 
 /* Return true if session is in fully functional(in public-key or secret-key mode), false otherwise. */
 bool rwtp_session_check_complete_mode(rwtp_session *self);
+
+rwtp_frame *rwtp_frame_gen_network_key();
+rwtp_frame *rwtp_frame_gen_private_key();
+rwtp_frame *rwtp_frame_gen_secret_key();

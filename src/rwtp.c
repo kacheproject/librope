@@ -595,3 +595,27 @@ bool rwtp_session_check_secret_key_mode(rwtp_session *self){
 bool rwtp_session_check_complete_mode(rwtp_session *self){
     return rwtp_session_check_public_key_mode(self) || rwtp_session_check_secret_key_mode(self);
 }
+
+rwtp_frame *rwtp_frame_gen_private_key(){
+    char privatek[crypto_box_SECRETKEYBYTES], pubk[crypto_box_PUBLICKEYBYTES];
+    if(crypto_box_keypair(pubk, privatek)){
+        return NULL;
+    }
+    rwtp_frame *result = rwtp_frame_new(crypto_box_SECRETKEYBYTES, NULL);
+    if (!result) return NULL;
+    memcpy(result->iovec_data, privatek, result->iovec_len);
+    return result;
+}
+
+rwtp_frame *rwtp_frame_gen_network_key(){
+    return rwtp_frame_gen_private_key();
+}
+
+rwtp_frame *rwtp_frame_gen_secret_key(){
+    char sk[crypto_secretstream_xchacha20poly1305_KEYBYTES];
+    crypto_secretstream_xchacha20poly1305_keygen(sk);
+    rwtp_frame *result = rwtp_frame_new(crypto_secretstream_xchacha20poly1305_KEYBYTES, NULL);
+    if (!result) return NULL;
+    memcpy(result->iovec_data, sk, result->iovec_len);
+    return result;
+}
