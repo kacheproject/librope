@@ -276,7 +276,7 @@ static rwtp_frame *rwtp_session_encrypt_single(const rwtp_session *self,
 static rwtp_frame *rwtp_session_decrypt_single(rwtp_session *self,
                                                const rwtp_frame *f) {
     if (rwtp_session_check_public_key_mode(self)) {
-        unsigned char msg_nonce[crypto_box_NONCEBYTES];
+        unsigned char msg_nonce[crypto_box_NONCEBYTES] = {};
         rwtp_frame msg_nonce_frame = {.iovec_data = msg_nonce,
                                       .iovec_len = crypto_box_NONCEBYTES};
         rwtp_crypto_save csave = {
