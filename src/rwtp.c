@@ -153,6 +153,14 @@ rwtp_frame *rwtp_frame_unpack_frames(const rwtp_frame *self) {
             msgpack_object_bin binary = unpacked.data.via.bin;
             result_last = result_current;
             result_current = rwtp_frame_new(binary.size, NULL);
+            if (!result_current){
+                msgpack_unpacked_destroy(&unpacked);
+                msgpack_unpacker_destroy(&unpacker);
+                if (result_head){
+                    rwtp_frame_destroy_all(result_head);
+                }
+                return NULL;
+            }
             memcpy(result_current->iovec_data, binary.ptr, binary.size);
             if (!result_head) {
                 result_head = result_current;
