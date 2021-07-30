@@ -495,7 +495,7 @@ rwtp_frame *rwtp_session_send_set_time(const rwtp_session *self, int64_t time){
     char *timestr = int64tostr(time);
     rwtp_frame timef = {
         .iovec_data = timestr,
-        .iovec_len = sizeof(uint64_t),
+        .iovec_len = strlen(timestr)+1,
     };
     rwtp_frame message[3] = {
         {(uint8_t*)&RWTP_SETOPT, sizeof(uint8_t)},
