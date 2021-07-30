@@ -111,7 +111,6 @@ TEST(rwtp_session, rwtp_session_can_handshake_public_key_mode) {
     rwtp_frame_destroy(bob_set_timef);
     REQUIRE(alice_set_time_received.status_code == RWTP_SETOPT);
     REQUIRE(alice_set_time_received.opt == RWTP_OPTS_TIME);
-    printf("alice.time_offest: %ld\n", alice.time_offest);
     REQUIRE(alice.time_offest == 1 || alice.time_offest == 2);
     rwtp_session_read_result alice_ask_time_received = rwtp_session_read(&alice, bob_ask_timef);
     rwtp_frame_destroy(bob_ask_timef);
