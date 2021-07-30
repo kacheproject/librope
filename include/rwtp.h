@@ -166,11 +166,12 @@ typedef struct rwtp_session_read_result {
 } rwtp_session_read_result;
 
 /* Read raw_single message. Return a structure with infomation about user needed to do.
-* Assume result is a rwtp_session_read_result. result->status_code will be non-negative when operation successed,
+* Assume result is a rwtp_session_read_result. result.status_code will be non-negative when operation successed,
 the number will be one of protocol control code: RWTP_DATA, RWTP_SETOPT, RWTP_ASKOPT.
-* result->user_message will be the pointer to message frames when status_code is RWTP_DATA.
+* result.status_code will be negative integer when error happens: -1: crypto error, -2: unknown control code, -3: bad message format.
+* result.user_message will be the pointer to message frames when status_code is RWTP_DATA.
 Caller own the value, they should apply rwtp_frame_destroy* on the frames when the pointer is non-null.
-* result->opt will be the option key when status_code is RWTP_SETOPT or RWTP_ASKOPT: RWTP_OPTS_PUBKEY.
+* result.opt will be the option key when status_code is RWTP_SETOPT or RWTP_ASKOPT: RWTP_OPTS_PUBKEY.
 */
 rwtp_session_read_result rwtp_session_read(rwtp_session *self, const rwtp_frame *raw_single);
 
