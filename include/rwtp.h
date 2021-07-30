@@ -83,7 +83,7 @@ typedef struct rwtp_crypto_save {
 } rwtp_crypto_save;
 
 /* Encrypt single rwtp_frame. Return the encrypted version which created with rwtp_frame_new, but NULL when failed.
-* The pk, sk, nonce should be setted up in save, as requirement for crypto_box_easy.
+* The pk, sk, nonce should be set up in save, as requirement for crypto_box_easy.
 * 
 * Sizes:
 * pk: crypto_box_PUBLICKEYBYTES
@@ -94,7 +94,7 @@ typedef struct rwtp_crypto_save {
 */
 rwtp_frame *rwtp_frame_encrypt_single(const rwtp_frame *self, const rwtp_crypto_save *save);
 /* Decrypt single rwtp_frame. Return de plain-text version which created with rwtp_frame_new, but NULL when failed.
-* The pk, sk in save should be setted up, and the nonce should be an empty rwtp_frame with crypto_box_MACBYTES bytes size.
+* The pk, sk and nonce in save should be set up.
 * 
 * Sizes:
 * pk: crypto_box_PUBLICKEYBYTES
