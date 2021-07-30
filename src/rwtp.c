@@ -284,15 +284,15 @@ static rwtp_frame *rwtp_session_encrypt_single(const rwtp_session *self,
 static rwtp_frame *rwtp_session_decrypt_single(rwtp_session *self,
                                                const rwtp_frame *f) {
     if (rwtp_session_check_public_key_mode(self)) {
-        unsigned char msg_nonce[crypto_box_NONCEBYTES] = {};
-        rwtp_frame msg_nonce_frame = {.iovec_data = msg_nonce,
-                                      .iovec_len = crypto_box_NONCEBYTES};
         rwtp_crypto_save csave = {
             .pk = self->remote_public_key,
             .sk = self->self_private_key,
-            .nonce = &msg_nonce_frame,
+            .nonce = self->nonce_or_header,
         };
         rwtp_frame *result = rwtp_frame_decrypt_single(f, &csave);
+        if (result){
+            sodium_increment(self->nonce_or_header->iovec_data, self->nonce_or_header->iovec_len);
+        }
         return result;
     } else if (rwtp_session_check_secret_key_mode(self)) {
         rwtp_frame *result = rwtp_frame_new(
