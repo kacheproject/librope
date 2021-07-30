@@ -380,7 +380,7 @@ rwtp_session_read_result rwtp_session_read(rwtp_session *self, const rwtp_frame 
                 rwtp_frame_destroy_all(frames);
                 return (struct rwtp_session_read_result){-3};
             }
-            int64_t offest = remote_time - local_time;
+            int64_t offest = local_time - remote_time;
             self->time_offest = offest;
         } else {
             rwtp_frame_destroy_all(frames);

@@ -154,7 +154,7 @@ typedef struct rwtp_session {
     rwtp_frame *secret_key; /* used in secret-key mode */
 
     rwtp_frame *nonce_or_header;
-    int64_t time_offest; /* remote - local */
+    int64_t time_offest; /* local - remote */
 
     crypto_secretstream_xchacha20poly1305_state *_state; /* used in secret-key mode */
 } rwtp_session;
