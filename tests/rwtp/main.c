@@ -86,6 +86,7 @@ TEST(rwtp_session, rwtp_session_can_handshake_public_key_mode) {
     rwtp_frame *alice_set_pub_keyf = rwtp_session_send_set_pub_key(&alice, alice_private_key, alice_iv);
     rwtp_frame_destroy(alice_private_key);
     rwtp_session_read_result bob_set_pub_key_received = rwtp_session_read(&bob, alice_set_pub_keyf);
+    rwtp_frame_destroy(alice_set_pub_keyf);
     REQUIRE(bob_set_pub_key_received.status_code == RWTP_SETOPT);
     REQUIRE(bob_set_pub_key_received.opt == RWTP_OPTS_PUBKEY);
 
