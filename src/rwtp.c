@@ -62,11 +62,12 @@ void rwtp_frame_deinit(rwtp_frame *self) {
 }
 
 void rwtp_frame_deinit_all(rwtp_frame *self) {
-    rwtp_frame *next = self;
-    while ((self = next)) {
-        next = self->frame_next;
-        rwtp_frame_deinit(self);
+    if (!self){
+        return;
     }
+    rwtp_frame *next = self->frame_next;
+    rwtp_frame_deinit(self);
+    return rwtp_frame_deinit_all(next);
 }
 
 rwtp_frame *rwtp_frame_new(size_t iovec_len, rwtp_frame *frame_next) {
@@ -87,12 +88,15 @@ void rwtp_frame_destroy(rwtp_frame *self) {
 }
 
 void rwtp_frame_destroy_all(rwtp_frame *self) {
-    rwtp_frame_deinit_all(self);
-    rwtp_frame *next = self;
-    while ((self = next)) {
-        next = self->frame_next;
-        free(self);
+    /* We could not have rwtp_frame_deinit_all here, because the rwtp_frame_deinit comes with rwtp_frame_reset,
+    * which will empty the structure and empty the frame_next field. (Rubicon 31/Jul./2021) */
+    if (!self){
+        return;
     }
+    rwtp_frame *next = self->frame_next;
+    rwtp_frame_deinit(self);
+    free(self);
+    return rwtp_frame_destroy_all(next);
 }
 
 void rwtp_frame_reset(rwtp_frame *self) {
