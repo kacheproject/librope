@@ -49,8 +49,8 @@ TEST(rwtp_frame, rwtp_frame_pack_frames_and_rwtp_frame_unpack_frames){
     rwtp_frame *blk = rwtp_frame_pack_frames(frames);
     rwtp_frame *unpacked = rwtp_frame_unpack_frames(blk);
     rwtp_frame_destroy(blk);
-    CHECK_STREQ(unpacked->iovec_data, frames[0].iovec_data);
-    CHECK_STREQ(unpacked->frame_next->iovec_data, frames[1].iovec_data);
+    CHECK_STREQ((char *)(unpacked->iovec_data), (char *)(frames[0].iovec_data));
+    CHECK_STREQ((char *)(unpacked->frame_next->iovec_data), (char *)(frames[1].iovec_data));
     rwtp_frame_destroy_all(unpacked);
 }
 
