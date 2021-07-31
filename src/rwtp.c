@@ -122,7 +122,7 @@ rwtp_frame *rwtp_frame_pack_frames(const rwtp_frame *self) {
     }
     rwtp_frame *result = rwtp_frame_new(sbuf.size, NULL);
     memcpy(result->iovec_data, sbuf.data, sbuf.size);
-    msgpack_sbuffer_release(&sbuf);
+    msgpack_sbuffer_destroy(&sbuf);
     return result;
 }
 
