@@ -172,6 +172,7 @@ rwtp_frame *rwtp_frame_unpack_frames(const rwtp_frame *self) {
             if (result_last) {
                 result_last->frame_next = result_current;
             }
+            msgpack_unpacked_destroy(&unpacked);
         } else if (unpacking_result == MSGPACK_UNPACK_CONTINUE) {
             msgpack_unpacked_destroy(&unpacked);
             break;
