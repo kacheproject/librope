@@ -471,6 +471,12 @@ rwtp_frame *rwtp_session_send_set_pub_key(rwtp_session *self,
     assert(self_private_key->iovec_len == crypto_box_SECRETKEYBYTES);
     assert(iv->iovec_len == crypto_box_NONCEBYTES);
 
+    rwtp_frame *self_private_key_dup = rwtp_frame_clone(self_private_key);
+    rwtp_frame *iv_dup = rwtp_frame_clone(iv);
+    if (!self_private_key_dup || !iv_dup){
+        return NULL;
+    }
+
     unsigned char pk[crypto_box_PUBLICKEYBYTES];
     crypto_scalarmult_base(pk, self_private_key->iovec_data);
     rwtp_frame pk_frame = {
@@ -484,12 +490,14 @@ rwtp_frame *rwtp_session_send_set_pub_key(rwtp_session *self,
     result = rwtp_session_encrypt_single(self, blk);
     rwtp_frame_destroy(blk);
     if (!result) {
+        rwtp_frame_destroy(self_private_key_dup);
+        rwtp_frame_destroy(iv_dup);
         return NULL;
     }
 
     // After message "sent", we update options
-    self->self_private_key = rwtp_frame_clone(self_private_key);
-    self->nonce_or_header = rwtp_frame_clone(iv);
+    self->self_private_key = self_private_key_dup;
+    self->nonce_or_header = iv_dup;
 
     return result;
 }
