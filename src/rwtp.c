@@ -130,7 +130,7 @@ rwtp_frame *rwtp_frame_unpack_frames(const rwtp_frame *self) {
     rwtp_frame *result_head, *result_current, *result_last;
     result_last = result_current = result_head = NULL;
     msgpack_unpacker unpacker;
-    if (!msgpack_unpacker_init(&unpacker, 128)) {
+    if (!msgpack_unpacker_init(&unpacker, 16)) {
         return NULL;
     }
     if (msgpack_unpacker_buffer_capacity(&unpacker) < self->iovec_len) {
