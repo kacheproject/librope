@@ -610,19 +610,19 @@ void rwtp_session_deinit(rwtp_session *self){
     }
 }
 
-bool rwtp_session_check_seal_mode(rwtp_session *self){
+bool rwtp_session_check_seal_mode(const rwtp_session *self){
     return self->network_key && !rwtp_session_check_complete_mode(self);
 }
 
-bool rwtp_session_check_public_key_mode(rwtp_session *self){
+bool rwtp_session_check_public_key_mode(const rwtp_session *self){
     return self->remote_public_key && self->self_private_key;
 }
 
-bool rwtp_session_check_secret_key_mode(rwtp_session *self){
+bool rwtp_session_check_secret_key_mode(const rwtp_session *self){
     return !!self->secret_key;
 }
 
-bool rwtp_session_check_complete_mode(rwtp_session *self){
+bool rwtp_session_check_complete_mode(const rwtp_session *self){
     return rwtp_session_check_public_key_mode(self) || rwtp_session_check_secret_key_mode(self);
 }
 

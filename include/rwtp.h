@@ -188,16 +188,16 @@ rwtp_frame *rwtp_session_send_ask_option(rwtp_session *self, uint8_t opt);
 void rwtp_session_deinit(rwtp_session *self);
 
 /* Return true if session is in seal mode, false otherwise. */
-bool rwtp_session_check_seal_mode(rwtp_session *self);
+bool rwtp_session_check_seal_mode(const rwtp_session *self);
 
 /* Return true if session is in public-key mode, false otherwise. */
-bool rwtp_session_check_public_key_mode(rwtp_session *self);
+bool rwtp_session_check_public_key_mode(const rwtp_session *self);
 
 /* Return true if session is in secret-key mode, false otherwise. */
-bool rwtp_session_check_secret_key_mode(rwtp_session *self);
+bool rwtp_session_check_secret_key_mode(const rwtp_session *self);
 
 /* Return true if session is in fully functional(in public-key or secret-key mode), false otherwise. */
-bool rwtp_session_check_complete_mode(rwtp_session *self);
+bool rwtp_session_check_complete_mode(const rwtp_session *self);
 
 rwtp_frame *rwtp_frame_gen_network_key();
 rwtp_frame *rwtp_frame_gen_private_key();
