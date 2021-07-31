@@ -316,6 +316,86 @@ static rwtp_frame *rwtp_session_decrypt_single(rwtp_session *self,
     }
 }
 
+static rwtp_session_read_result rwtp_session_read_data(rwtp_session *self, rwtp_frame *frames){
+    rwtp_frame *user_frame_head = frames->frame_next;
+    frames->frame_next = NULL;
+    if (!user_frame_head){
+        return (struct rwtp_session_read_result){-3};
+    }
+    return (struct rwtp_session_read_result){RWTP_DATA, user_frame_head};
+}
+
+static rwtp_session_read_result rwtp_session_read_setopt(rwtp_session *self, rwtp_frame *frames){
+    rwtp_frame *opt_key_frame = frames->frame_next;
+    if (!rwtp_frame_check_size_fixed(opt_key_frame, sizeof(uint8_t))) {
+        return (struct rwtp_session_read_result){-3};
+    }
+    uint8_t opt_key = *((uint8_t *)opt_key_frame->iovec_data);
+    if (opt_key == RWTP_OPTS_PUBKEY && !self->secret_key) {
+        rwtp_frame *pub_keyf, *ivf;
+        if (!(pub_keyf = opt_key_frame->frame_next) ||
+            !(ivf = pub_keyf->frame_next)) {
+            return (struct rwtp_session_read_result){-3};
+        } else if (pub_keyf->iovec_len != crypto_box_PUBLICKEYBYTES ||
+                   ivf->iovec_len != crypto_box_NONCEBYTES) {
+            return (struct rwtp_session_read_result){-3};
+        }
+        pub_keyf = rwtp_frame_clone(pub_keyf);
+        ivf = rwtp_frame_clone(ivf);
+        pub_keyf->frame_next = ivf->frame_next = NULL;
+        self->remote_public_key = pub_keyf;
+        self->nonce_or_header = ivf;
+    } else if (opt_key == RWTP_OPTS_SECKEY && !self->remote_public_key) {
+        rwtp_frame *sec_keyf, *headerf;
+        if (!(sec_keyf = opt_key_frame->frame_next) ||
+            !(headerf = sec_keyf->frame_next)) {
+            return (struct rwtp_session_read_result){-3};
+        } else if (sec_keyf->iovec_len !=
+                       crypto_secretstream_xchacha20poly1305_KEYBYTES ||
+                   headerf->iovec_len !=
+                       crypto_secretstream_xchacha20poly1305_HEADERBYTES) {
+            return (struct rwtp_session_read_result){-3};
+        }
+        sec_keyf = rwtp_frame_clone(sec_keyf);
+        headerf = rwtp_frame_clone(headerf);
+        sec_keyf->frame_next = headerf->frame_next = NULL;
+        self->secret_key = sec_keyf;
+        self->nonce_or_header = headerf;
+    } else if (opt_key == RWTP_OPTS_TIME) {
+        rwtp_frame *timef;
+        if (!(timef = opt_key_frame->frame_next)) {
+            return (struct rwtp_session_read_result){-3};
+        }
+        intmax_t local_time = time(NULL);
+        if (!check_cstring(timef->iovec_data, timef->iovec_len)) {
+            return (struct rwtp_session_read_result){-3};
+        }
+        int64_t remote_time = strtoint64(timef->iovec_data, NULL, 0);
+        if (errno == ERANGE) {
+            return (struct rwtp_session_read_result){-3};
+        }
+        int64_t offest = local_time - remote_time;
+        self->time_offest = offest;
+    } else {
+        return (struct rwtp_session_read_result){-3};
+    }
+    return (struct rwtp_session_read_result){RWTP_SETOPT, .opt = opt_key};
+}
+
+static rwtp_session_read_result rwtp_session_read_askopt(rwtp_session *self,
+                                                         rwtp_frame *frames) {
+    rwtp_frame *opt_keyf = frames->frame_next;
+    if (rwtp_frame_check_size_fixed(opt_keyf, sizeof(uint8_t))) {
+        uint8_t opt_key = *((uint8_t *)opt_keyf->iovec_data);
+        if (opt_key < RWTP_OPTS_PUBKEY && opt_key > RWTP_OPTS_PUBKEY) {
+            return (struct rwtp_session_read_result){-3};
+        }
+        return (struct rwtp_session_read_result){RWTP_ASKOPT, .opt = opt_key};
+    } else {
+        return (struct rwtp_session_read_result){-3};
+    }
+}
+
 rwtp_session_read_result rwtp_session_read(rwtp_session *self, const rwtp_frame *raw_single){
     rwtp_frame *plaintext_blk = rwtp_session_decrypt_single(self, raw_single);
     if (!plaintext_blk){
@@ -323,92 +403,26 @@ rwtp_session_read_result rwtp_session_read(rwtp_session *self, const rwtp_frame 
     }
     rwtp_frame *frames = rwtp_frame_unpack_frames(plaintext_blk);
     rwtp_frame_destroy(plaintext_blk);
-    if (frames->iovec_len != sizeof(uint8_t)){
+    if (!frames){
+        return (struct rwtp_session_read_result){-3};
+    } else if (frames->iovec_len != sizeof(uint8_t)){
         return (struct rwtp_session_read_result){-3};
     }
     uint8_t ctl_code = *((uint8_t*) frames->iovec_data);
+
+    rwtp_session_read_result result;
     if (ctl_code == RWTP_DATA){
-        rwtp_frame *user_frame_head = frames->frame_next;
-        rwtp_frame_destroy(frames);
-        if (!user_frame_head){
-            return (struct rwtp_session_read_result){-3};
-        }
-        return (struct rwtp_session_read_result){RWTP_DATA, user_frame_head};
+        result = rwtp_session_read_data(self, frames);
     } else if (ctl_code == RWTP_SETOPT){
-        rwtp_frame *opt_key_frame = frames->frame_next;
-        if (!rwtp_frame_check_size_fixed(opt_key_frame, sizeof(uint8_t))){
-            return (struct rwtp_session_read_result){-3};
-        }
-        uint8_t opt_key = *((uint8_t*) opt_key_frame->iovec_data);
-        if (opt_key == RWTP_OPTS_PUBKEY && !self->secret_key){
-            rwtp_frame *pub_keyf, *ivf;
-            if (!(pub_keyf=opt_key_frame->frame_next) || !(ivf=pub_keyf->frame_next)){
-                rwtp_frame_destroy_all(frames);
-                return (struct rwtp_session_read_result){-3};
-            } else if (pub_keyf->iovec_len != crypto_box_PUBLICKEYBYTES || ivf->iovec_len != crypto_box_NONCEBYTES){
-                rwtp_frame_destroy_all(frames);
-                return (struct rwtp_session_read_result){-3};
-            }
-            pub_keyf = rwtp_frame_clone(pub_keyf);
-            ivf = rwtp_frame_clone(ivf);
-            pub_keyf->frame_next = ivf->frame_next = NULL;
-            self->remote_public_key = pub_keyf;
-            self->nonce_or_header = ivf;
-        } else if (opt_key == RWTP_OPTS_SECKEY && !self->remote_public_key) {
-            rwtp_frame *sec_keyf, *headerf;
-            if (!(sec_keyf=opt_key_frame->frame_next) || !(headerf = sec_keyf->frame_next)){
-                rwtp_frame_destroy_all(frames);
-                return (struct rwtp_session_read_result){-3};
-            } else if (sec_keyf->iovec_len != crypto_secretstream_xchacha20poly1305_KEYBYTES || headerf->iovec_len != crypto_secretstream_xchacha20poly1305_HEADERBYTES){
-                rwtp_frame_destroy_all(frames);
-                return (struct rwtp_session_read_result){-3};
-            }
-            sec_keyf = rwtp_frame_clone(sec_keyf);
-            headerf = rwtp_frame_clone(headerf);
-            sec_keyf->frame_next = headerf->frame_next = NULL;
-            self->secret_key = sec_keyf;
-            self->nonce_or_header = headerf;
-        } else if (opt_key == RWTP_OPTS_TIME) {
-            rwtp_frame *timef;
-            if (!(timef = opt_key_frame->frame_next)){
-                rwtp_frame_destroy_all(frames);
-                return (struct rwtp_session_read_result){-3};
-            }
-            intmax_t local_time = time(NULL);
-            if (!check_cstring(timef->iovec_data, timef->iovec_len)){
-                rwtp_frame_destroy_all(frames);
-                return (struct rwtp_session_read_result){-3};
-            }
-            int64_t remote_time = strtoint64(timef->iovec_data, NULL, 0);
-            if (errno == ERANGE){
-                rwtp_frame_destroy_all(frames);
-                return (struct rwtp_session_read_result){-3};
-            }
-            int64_t offest = local_time - remote_time;
-            self->time_offest = offest;
-        } else {
-            rwtp_frame_destroy_all(frames);
-            return (struct rwtp_session_read_result){-3};
-        }
-        rwtp_frame_destroy_all(frames);
-        return (struct rwtp_session_read_result){RWTP_SETOPT, .opt=opt_key};
+        result = rwtp_session_read_setopt(self, frames);
     } else if (ctl_code == RWTP_ASKOPT){
-        rwtp_frame *opt_keyf = frames->frame_next;
-        if (rwtp_frame_check_size_fixed(opt_keyf, sizeof(uint8_t))){
-            uint8_t opt_key = *((uint8_t*) opt_keyf->iovec_data);
-            if (opt_key < RWTP_OPTS_PUBKEY && opt_key > RWTP_OPTS_PUBKEY){
-                rwtp_frame_destroy_all(frames);
-                return (struct rwtp_session_read_result){-3};
-            }
-            return (struct rwtp_session_read_result){RWTP_ASKOPT, .opt=opt_key};
-        } else {
-            rwtp_frame_destroy_all(frames);
-            return (struct rwtp_session_read_result){-3};
-        }
+        result = rwtp_session_read_askopt(self, frames);
     } else {
-        rwtp_frame_destroy_all(frames);
-        return (struct rwtp_session_read_result){-2};
+        result = (struct rwtp_session_read_result){-2};
     }
+
+    rwtp_frame_destroy_all(frames);
+    return result;
 }
 
 rwtp_frame *rwtp_session_send(rwtp_session *self, rwtp_frame *raw){
