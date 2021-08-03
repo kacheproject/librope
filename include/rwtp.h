@@ -2,13 +2,13 @@
 #include <stdbool.h>
 #include <sodium.h>
 
-const uint8_t RWTP_DATA = 0;
-const uint8_t RWTP_SETOPT = 1;
-const uint8_t RWTP_ASKOPT = 2;
+static const uint8_t RWTP_DATA = 0;
+static const uint8_t RWTP_SETOPT = 1;
+static const uint8_t RWTP_ASKOPT = 2;
 
-const uint8_t RWTP_OPTS_PUBKEY = 1;
-const uint8_t RWTP_OPTS_SECKEY = 2;
-const uint8_t RWTP_OPTS_TIME = 3;
+static const uint8_t RWTP_OPTS_PUBKEY = 1;
+static const uint8_t RWTP_OPTS_SECKEY = 2;
+static const uint8_t RWTP_OPTS_TIME = 3;
 
 /* Initialise dependencies required by rwtp. You should call it at least once before any use of this library. 
 * Return -1 when failed.
