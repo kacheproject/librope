@@ -185,7 +185,10 @@ rwtp_frame *rwtp_session_send_set_time(const rwtp_session *self, int64_t time);
 
 rwtp_frame *rwtp_session_send_ask_option(rwtp_session *self, uint8_t opt);
 
+rwtp_session *rwtp_session_init(rwtp_session *self, const rwtp_frame *network_key);
 void rwtp_session_deinit(rwtp_session *self);
+rwtp_session *rwtp_session_new(const rwtp_frame *network_key);
+void rwtp_session_destroy(rwtp_session *self);
 
 /* Return true if session is in seal mode, false otherwise. */
 bool rwtp_session_check_seal_mode(const rwtp_session *self);

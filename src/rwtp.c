@@ -616,6 +616,17 @@ bool rwtp_frame_check_size_fixed(rwtp_frame *self, size_t size){
     }
 }
 
+rwtp_session *rwtp_session_init(rwtp_session *self, const rwtp_frame *network_key){
+    rwtp_frame *network_key_copy = rwtp_frame_clone(network_key);
+    if (!network_key_copy){
+        return NULL;
+    }
+    *self = (struct rwtp_session){
+        .network_key = network_key_copy,
+    };
+    return self;
+}
+
 void rwtp_session_deinit(rwtp_session *self){
     if (self->network_key){
         rwtp_frame_destroy(self->network_key);
@@ -635,6 +646,24 @@ void rwtp_session_deinit(rwtp_session *self){
     if(self->_state){
         free(self->_state);
     }
+}
+
+rwtp_session *rwtp_session_new(const rwtp_frame *network_key){
+    rwtp_session *object = malloc(sizeof(rwtp_session));
+    if (object){
+        if(!rwtp_session_init(object, network_key)){
+            free(object);
+            return NULL;
+        }
+        return object;
+    } else {
+        return NULL;
+    }
+}
+
+void rwtp_session_destroy(rwtp_session *self){
+    rwtp_session_deinit(self);
+    free(self);
 }
 
 bool rwtp_session_check_seal_mode(const rwtp_session *self){
