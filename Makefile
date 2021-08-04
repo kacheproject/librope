@@ -21,7 +21,14 @@ RWTP_LDFLAGS = -lsodium -lmsgpackc -lc
 
 TEST_RWTP_LDFLAGS := $(TEST_LDFLAGS) -lrwtp
 
-all: rwtp
+ROPE_SRC = src/rope.c
+ROPE_CFLAGS := $(CFLAGS) -Wall
+ROPE_LDFLAGS := -lczmq
+
+TEST_ROPE_LDFLAGS := $(TEST_LDFLAGS) -lrope -lczmq
+TEST_ROPE_CFLAGS := $(TEST_CFLAGS) -Itests/rope/
+
+all: rwtp rope
 
 asprintf.o:
 	$(CC) -c $(ASPRINTF_SRC) $(ASPRINTF_CFLAGS) -o $(BUILD_DIR)/asprintf.o
@@ -42,3 +49,23 @@ rwtp-test-run: rwtp-test
 
 rwtp-test-run-valgrind: rwtp-test
 	LD_LIBRARY_PATH=$(BUILD_DIR):$LD_LIBRARY_PATH valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes $(BUILD_DIR)/tests/rwtp/main
+
+rope.o:
+	$(CC) -c $(ROPE_SRC) $(ROPE_CFLAGS) -o $(BUILD_DIR)/rope.o
+
+rope: rope.o rwtp.o
+	$(CC) $(BUILD_DIR)/rope.o $(BUILD_DIR)/rwtp.o $(ROPE_LDFLAGS) $(RWTP_LDFLAGS) -shared -o $(BUILD_DIR)/librope.so
+
+rope-test: rope
+	mkdir -p $(BUILD_DIR)/tests/rope
+	$(CC) -c tests/rope/main.c $(TEST_ROPE_CFLAGS) -o $(BUILD_DIR)/tests/rope/main.o
+	$(CC) $(BUILD_DIR)/tests/rope/main.o $(TEST_ROPE_LDFLAGS) -o $(BUILD_DIR)/tests/rope/main
+
+rope-test-run: rope-test
+	LD_LIBRARY_PATH=$(BUILD_DIR):$LD_LIBRARY_PATH $(BUILD_DIR)/tests/rope/main
+
+rope-test-run-valgrind-detailed: rope-test
+	LD_LIBRARY_PATH=$(BUILD_DIR):$LD_LIBRARY_PATH valgrind --leak-check=full --track-origins=yes $(BUILD_DIR)/tests/rope/main
+
+rope-test-run-valgrind: rope-test
+	LD_LIBRARY_PATH=$(BUILD_DIR):$LD_LIBRARY_PATH valgrind $(BUILD_DIR)/tests/rope/main
