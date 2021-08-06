@@ -3,7 +3,20 @@
 
 TAU_MAIN()
 
+zactor_t *configure_monitor(zsock_t *sock){
+    zactor_t *monitor = zactor_new(zmonitor, sock);
+    zstr_send(monitor, "VERBOSE");
+    zstr_sendx(monitor, "LISTEN", "CONNECTED", "DISCONNECTED", NULL);
+    zstr_send(monitor, "START");
+    zsock_wait(monitor);
+    return monitor;
+}
+
 TEST(rope, working_with_one_socket){
+    if(rwtp_init()){
+        zsys_error("rwtp initialising failed");
+        return;
+    }
     int ret;
     zuuid_t *alice_id_z = zuuid_new();
     rwtp_frame *alice_id = rwtp_frame_from_zuuid(&alice_id_z);
@@ -36,7 +49,9 @@ TEST(rope, working_with_one_socket){
     REQUIRE_GE(ret, 0);
 
     zsock_t *alicei = zsock_new_dealer("tcp://127.0.0.1:7000");
+    zactor_t  *alice_monitor = configure_monitor(alicei);
     zsock_t *bobi = zsock_new_dealer("tcp://127.0.0.1:7001");
+    zactor_t *bob_monitor = configure_monitor(bobi);
 
     zstr_send(alicei, "HELLO");
     zpoller_t *poller = zpoller_new(alicei, bobi, NULL);
@@ -45,6 +60,8 @@ TEST(rope, working_with_one_socket){
     REQUIRE_STREQ(result, "HELLO");
     zstr_free(&result);
 
+    zactor_destroy(&alice_monitor);
+    zactor_destroy(&bob_monitor);
     zpoller_destroy(&poller);
     rope_router_destroy(alice_router);
     rope_router_destroy(bob_router);

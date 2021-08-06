@@ -24,7 +24,7 @@ typedef struct rope_wire {
     rwtp_session *selected_session;
 
     zhashx_t *sessions; // char * to rwtp_session *
-    int_fast32_t _ref;
+    int proxy_using_port;
 } rope_wire;
 
 rope_router *rope_router_init(rope_router *self, const rwtp_frame *self_id, const rwtp_frame *network_key);
@@ -62,18 +62,10 @@ rope_wire *rope_wire_merge(rope_wire *self, rope_wire *src);
 /* Extension to rwtp library */
 
 /* Return a pointer to rwtp_frame with data of uuid. Callee owns the argument. Caller owns the result.*/
-rwtp_frame *rwtp_frame_from_zuuid(zuuid_t **uuid){
-    rwtp_frame *result = rwtp_frame_new(zuuid_size(*uuid), NULL);
-    memcpy(result->iovec_data, zuuid_data(*uuid), zuuid_size(*uuid));
-    zuuid_destroy(uuid);
-    return result;
-}
+rwtp_frame *rwtp_frame_from_zuuid(zuuid_t **uuid);
 
 /* Return a zuuid_t * with uuid in self. Caller owns the argument and the result. */
-zuuid_t *rwtp_frame_to_zuuid(rwtp_frame *self){
-    assert(self->iovec_len==ZUUID_LEN);
-    return zuuid_new_from(self->iovec_data);
-}
+zuuid_t *rwtp_frame_to_zuuid(rwtp_frame *self);
 
 zmsg_t *rwtp_frame_to_zmsg(const rwtp_frame *self);
 rwtp_frame *rwtp_frame_from_zmsg(zmsg_t *zmsg);

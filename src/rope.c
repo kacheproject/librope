@@ -3,13 +3,7 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <time.h>
-
-static char *strdup(const char *src) {
-    size_t len = strlen(src);
-    char *copy = malloc(len + 1);
-    strncpy(copy, src, len);
-    return copy;
-}
+#include <string.h>
 
 static const void *zhashx_lookupr(zhashx_t *self, const void *value) {
     const char *key = NULL;
@@ -260,12 +254,19 @@ void rope_router_destroy(rope_router *self) {
 int rope_router_poll(rope_router *self, int timeout) {
     zsock_t *sock = zpoller_wait(self->poller, timeout);
     if (sock) {
-        rope_wire *wire_object = zhashx_lookup(self->wires, self);
-        if (rope_wire_handle_message(wire_object, sock)) {
+        rope_wire *wire_object = zhashx_lookup(self->wires, sock);
+        if (!wire_object){
+            zsys_error("rope_router_poll: could not found rope_wire object for socket %p, recent endpoint %s.", sock, zsock_endpoint(sock));
+            return -EPERM;
+        }
+        int handler_ret = rope_wire_handle_message(wire_object, sock);
+        if (handler_ret) {
             return -EBADMSG;
         }
+    } else if (zpoller_terminated(self->poller)){
+        return -ETERM;
     } else {
-        return -EPERM;
+        return -EAGAIN;
     }
     return 0;
 }
@@ -315,7 +316,7 @@ rope_wire *rope_wire_init(rope_wire *self, rope_router *router,
         .monitors = monitors,
         .proxy_socket_type = proxy_socket_type,
         .sessions = sessions,
-        ._ref = 0,
+        .proxy_using_port = -1,
     };
     zhashx_set_destructor(p_wires, zsock_or_zactor_destructor);
     zhashx_set_destructor(monitors, zsock_or_zactor_destructor);
@@ -400,6 +401,11 @@ int rope_wire_add_wire(rope_wire *self, const char *physical_addr,
     zhashx_insert(self->router->wires, sock, self);
     zhashx_insert(self->router->wires, monitor, self);
     zhashx_insert(self->sessions, physical_addr, new_session);
+    int poller_ret = zpoller_add(self->router->poller, sock);
+    assert(!poller_ret); /* TODO: friendly handling */
+    poller_ret = zpoller_add(self->router->poller, monitor);
+    assert(!poller_ret);
+    zsys_debug("rope_wire_add_wire: rope_wire %p added physical wire \"%s\", socket %p", self, physical_addr, sock);
     return 0;
 }
 
@@ -430,8 +436,8 @@ void rope_wire_remove_wire(rope_wire *self, const char *physical_addr) {
 }
 
 static void rope_wire_select_p_wire(rope_wire *self) {
-    const char *best_p_addr = NULL;
-    for (const char *curr_k = zhashx_first(self->p_wires); curr_k;
+    char *best_p_addr = NULL;
+    for (char *curr_k = zhashx_first(self->p_wires); curr_k;
          curr_k = zhashx_next(self->p_wires)) {
         if (!best_p_addr) {
             best_p_addr = curr_k;
@@ -448,7 +454,7 @@ static void rope_wire_select_p_wire(rope_wire *self) {
                 best_p_addr = curr_k;
             }
         } else {
-            zsys_error("rope_wire_select_p_wire: physical address %s does not "
+            zsys_error("rope_wire_select_p_wire: physical address \"%s\" does not "
                        "have wire state, every physical wire should have state",
                        curr_k);
         }
@@ -466,13 +472,21 @@ static rwtp_session *rope_wire_get_session_by_socket(rope_wire *self,
     return zhashx_lookup(self->sessions, paddr);
 }
 
-static zsock_t *rope_wire_proxy(rope_wire *self) {
+zsock_t *rope_wire_proxy(rope_wire *self) {
     if (!self->proxy) {
+        zsys_info("rope_wire_proxy: initialising proxy for endpoint %s", self->proxy_binding_address);
         zsock_t *proxy = zsock_new(self->proxy_socket_type);
-        int ret;
-        if (!(ret = zsock_bind(proxy, self->proxy_binding_address))) {
+        int ret = zsock_bind(proxy, self->proxy_binding_address);
+        if (ret != -1) {
+            if (zhashx_insert(self->router->wires, proxy, self)){
+                return NULL;
+            }
+            if(zpoller_add(self->router->poller, proxy)){
+                zhashx_delete(self->router->wires, proxy);
+                return NULL;
+            }
             self->proxy = proxy;
-            zhashx_insert(self->router->wires, proxy, self);
+            self->proxy_using_port = ret;
         } else {
             zsock_destroy(&proxy);
             zsys_warning("rope_wire_proxy: proxy socket lazy binding "
@@ -530,10 +544,38 @@ rope_wire_handle_options_read_result(rope_wire *self,
     }
 }
 
+static int rope_handshake_request(zsock_t *selected_p_wire,
+                                      rwtp_session *selected_session, int zmq_sock_type) {
+    if (zmq_sock_type == ZMQ_DEALER) {
+        rwtp_frame *prikey = rwtp_frame_gen_private_key();
+        rwtp_frame *iv = rwtp_frame_gen_public_key_mode_iv();
+        rwtp_frame *set_pub_key_frame =
+            rwtp_session_send_set_pub_key(selected_session, prikey, iv);
+        rwtp_frame_destroy(prikey);
+        rwtp_frame_destroy(iv);
+        zframe_t *set_pub_key_zframe = rwtp_frame_to_zframe(set_pub_key_frame);
+        zframe_send(&set_pub_key_zframe, selected_p_wire, 0);
+        rwtp_frame_destroy(set_pub_key_frame);
+        rwtp_frame *ask_pub_key_frame = rwtp_session_send_ask_option(
+            selected_session, RWTP_OPTS_PUBKEY);
+        zframe_t *ask_pub_key_zframe = rwtp_frame_to_zframe(ask_pub_key_frame);
+        zframe_send(&ask_pub_key_zframe, selected_p_wire, 0);
+    } else if (zmq_sock_type == ZMQ_SUB) {
+        rwtp_frame *seckey = rwtp_frame_gen_secret_key();
+        rwtp_frame *set_sec_key_frame =
+            rwtp_session_send_set_sec_key(selected_session, seckey);
+        rwtp_frame_destroy(seckey);
+        zframe_t *set_sec_key_zframe = rwtp_frame_to_zframe(set_sec_key_frame);
+        zframe_send(&set_sec_key_zframe, selected_p_wire, 0);
+    } else {
+        zsys_error("rope_handshake_request: unknown proxy socket type %d",
+                   zmq_sock_type);
+    }
+    return 0;
+}
+
 int rope_wire_handle_message(rope_wire *self, zsock_t *sock) {
-    zsys_debug(
-        "rope_wire_handle_message: handle message for wire %p and sock %p",
-        self, sock);
+    zsys_info("rope_wire_handle_message");
     if (sock == rope_wire_proxy(self)) {
         if (wire_physical_state_life(self->selected_p_state) < 0.01) {
             rope_wire_select_p_wire(self);
@@ -545,37 +587,12 @@ int rope_wire_handle_message(rope_wire *self, zsock_t *sock) {
                 rwtp_session_send(self->selected_session, frames);
             zmsg_destroy(&msg);
             rwtp_frame_destroy_all(frames);
-            zframe_send(rwtp_frame_to_zframe(packed_frame),
-                        self->selected_p_wire, 0);
+            zframe_t *zpacked_frame = rwtp_frame_to_zframe(packed_frame);
+            zframe_send(&zpacked_frame, self->selected_p_wire, 0);
             rwtp_frame_destroy(packed_frame);
         } else {
-            zsys_warning("rope_wire_handle_message: start handshake.");
-            if (zsock_type(sock) == ZMQ_DEALER) {
-                rwtp_frame *prikey = rwtp_frame_gen_private_key();
-                rwtp_frame *iv = rwtp_frame_gen_public_key_mode_iv();
-                rwtp_frame *set_pub_key_frame = rwtp_session_send_set_pub_key(
-                    self->selected_session, prikey, iv);
-                rwtp_frame_destroy(prikey);
-                rwtp_frame_destroy(iv);
-                zframe_send(rwtp_frame_to_zframe(set_pub_key_frame),
-                            self->selected_p_wire, 0);
-                rwtp_frame_destroy(set_pub_key_frame);
-                rwtp_frame *ask_pub_key_frame = rwtp_session_send_ask_option(
-                    self->selected_session, RWTP_OPTS_PUBKEY);
-                zframe_send(rwtp_frame_to_zframe(set_pub_key_frame),
-                            self->selected_p_wire, 0);
-            } else if (zsock_type(sock) == ZMQ_SUB) {
-                rwtp_frame *seckey = rwtp_frame_gen_secret_key();
-                rwtp_frame *set_sec_key_frame = rwtp_session_send_set_sec_key(
-                    self->selected_session, seckey);
-                rwtp_frame_destroy(seckey);
-                zframe_send(rwtp_frame_to_zframe(set_sec_key_frame),
-                            self->selected_p_wire, 0);
-            } else {
-                zsys_error(
-                    "rope_wire_handle_message: unknown proxy socket type %s",
-                    zsock_type_str(sock));
-            }
+            zsys_debug("rope_wire_handle_message: start handshake.");
+            rope_handshake_request(self->selected_p_wire, self->selected_session, zsock_type(sock));
         }
     } else if (zactor_is(sock)) {
         const char *physical_addr = zhashx_lookupr(self->monitors, sock);
@@ -602,8 +619,8 @@ int rope_wire_handle_message(rope_wire *self, zsock_t *sock) {
             rwtp_session_read_result result =
                 rwtp_session_read(corresponding_session, frame_cp);
             rwtp_frame_destroy(frame_cp);
-            if (rwtp_session_check_complete_mode(corresponding_session)) {
-                if (result.status_code >= 0) {
+            if (result.status_code >= 0) {
+                if (rwtp_session_check_complete_mode(corresponding_session)) {
                     if (result.user_message) {
                         zmsg_t *msg = rwtp_frame_to_zmsg(result.user_message);
                         for (int tried = 4; tried > 0; tried--) {
@@ -622,22 +639,28 @@ int rope_wire_handle_message(rope_wire *self, zsock_t *sock) {
                     rwtp_frame *reply = rope_wire_handle_options_read_result(
                         self, &result, corresponding_session);
                     if (reply) {
-                        zframe_send(rwtp_frame_to_zframe(reply), sock, 0);
+                        zframe_t *zreply = rwtp_frame_to_zframe(reply);
+                        zframe_send(&zreply, sock, 0);
+                        rwtp_frame_destroy(reply);
+                    }
+                } else {
+                    rwtp_frame *reply = rope_wire_handle_options_read_result(
+                        self, &result, corresponding_session);
+                    if (reply) {
+                        zframe_t *zreply = rwtp_frame_to_zframe(reply);
+                        zframe_send(&zreply, sock, 0);
                         rwtp_frame_destroy(reply);
                     }
                 }
             } else {
-                rwtp_frame *reply = rope_wire_handle_options_read_result(
-                    self, &result, corresponding_session);
-                if (reply) {
-                    zframe_send(rwtp_frame_to_zframe(reply), sock, 0);
-                    rwtp_frame_destroy(reply);
-                }
+                zsys_info("rope_wire_handle_message: session read message failed, code %d", result.status_code);
+                return -EBADMSG;
             }
         } else {
             zsys_warning(
                 "rope_wire_handle_message: could not feed received message "
                 "into proxy, proxy socket not found, message dropped.");
+            return -EPERM;
         }
     }
     return 0;
@@ -693,29 +716,21 @@ int rope_wire_bind_sub(rope_wire *self, const char *address) {
 static void rope_router_poll_actor(zsock_t *pipe, void *args) {
     rope_router *router = args;
     zpoller_t *self_poller = zpoller_new(pipe, NULL);
-    if (zsock_wait(pipe) >= 0) {
-        while (true) {
-            int ret;
-            if ((ret = rope_router_poll(router, 2))) {
-                zsys_warning("rope_router_poll_actor: error %d while running "
-                             "rope_router_poll.",
-                             ret);
-            }
-            zsock_t *pipe;
-            if ((pipe = zpoller_wait(self_poller, 0))) {
-                char *ctlcmd;
-                if (zstr_recvx(pipe, &ctlcmd) > 0) {
-                    if (strcmp(ctlcmd, "STOP")) {
-                        zstr_free(&ctlcmd);
-                        break;
-                    }
-                    zstr_free(&ctlcmd);
-                }
-            }
+    if (!self_poller){
+        zsock_signal(pipe, -1);
+        zsys_error("rope_router_poll_actor: could not initialise zpoller, exit.");
+        return;
+    }
+    zsys_info("rope_router_poll_actor: started on router %p", router);
+    zsock_signal(pipe, 0);
+    while ((!zpoller_wait(self_poller, 0)) && (!zpoller_terminated(self_poller))) {
+        int ret = rope_router_poll(router, 2000);
+        if (ret == -ETERM){
+            break;
         }
     }
     zpoller_destroy(&self_poller);
-    zstr_sendx(pipe, "STOPPED", NULL);
+    zsys_info("rope_router_poll_actor: stopped on router %p", router);
 }
 
 int rope_router_start_poll_thread(rope_router *self) {
@@ -727,8 +742,18 @@ int rope_router_start_poll_thread(rope_router *self) {
 }
 
 void rope_router_stop_poll_thread(rope_router *self) {
-    zstr_sendx(self->poll_actor, "STOP", NULL);
-    zsock_wait(self->poll_actor);
     zactor_destroy(&self->poll_actor);
     self->poll_actor = NULL;
+}
+
+rwtp_frame *rwtp_frame_from_zuuid(zuuid_t **uuid){
+    rwtp_frame *result = rwtp_frame_new(zuuid_size(*uuid), NULL);
+    memcpy(result->iovec_data, zuuid_data(*uuid), zuuid_size(*uuid));
+    zuuid_destroy(uuid);
+    return result;
+}
+
+zuuid_t *rwtp_frame_to_zuuid(rwtp_frame *self){
+    assert(self->iovec_len==ZUUID_LEN);
+    return zuuid_new_from(self->iovec_data);
 }
