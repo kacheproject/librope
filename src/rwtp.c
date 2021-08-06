@@ -35,7 +35,7 @@ static bool check_cstring(const char str[], size_t length){
 
 int rwtp_init() {
     int sodium_ret = sodium_init();
-    if (!sodium_ret) {
+    if (sodium_ret) {
         return -1;
     }
     return 0;
