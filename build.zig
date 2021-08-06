@@ -66,6 +66,7 @@ pub fn build(b: *std.build.Builder) void {
     rope_test.addCSourceFile("tests/rope/main.c", &.{"-Wall", "-g"});
     rope_test.linkSystemLibrary("sodium");
     rope_test.setBuildMode(.Debug);
+    rope_test.install();
     const rope_test_run_step = rope_test.run();
 
     const rope_test_step = b.step("rope_test", "run test for rope");
@@ -79,6 +80,7 @@ pub fn build(b: *std.build.Builder) void {
     rwtp_test.linkLibrary(librwtp_static);
     rwtp_test.addCSourceFile("tests/rwtp/main.c", &.{"-Wall", "-g"});
     rwtp_test.setBuildMode(.Debug);
+    rwtp_test.install();
     const rwtp_test_run_step = rwtp_test.run();
 
     const rwtp_test_step = b.step("rwtp_test", "run test for rwtp");
