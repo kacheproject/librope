@@ -53,3 +53,7 @@ dkms.conf
 
 # Makru build results
 build/
+
+# Zig Build System default prefixes
+zig-cache/
+zig-out/

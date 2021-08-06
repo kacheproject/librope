@@ -1,11 +1,15 @@
 # librope
 Librope is a implementation for Rope.
 
+This software is still in early stage.
+
+Maintainer: `Rubicon <l1589002388 at gmail.com>`
+
 ## Build instruction
 
 Currently librope only offically support *unix platform. Any contribution welcome!
 
-librope have two different parts: librope and librwtp: Librwtp is an abstract implementation for Rope Wire Transfer Protocol, Librope is an implementation uses ZeroMQ as transport.
+librope have two parts: librope and librwtp: Librwtp is an abstract implementation for Rope Wire Transfer Protocol, Librope is an implementation uses ZeroMQ as transport.
 
 To build librope, you need libraries following:
 
@@ -13,20 +17,22 @@ To build librope, you need libraries following:
 - libsodium
 - czmq
 
-and a C compiler supports C11 standard. Building librwtp just need the first two.
+and [a zig compiler, version 0.8.0](https://ziglang.org). The zig compiler ships with clang, so you don't need to mind the C compiler on computer.
 
 ````
-make rwtp
+zig build
 ````
-to make a shared library of librwtp. The production is "build/librwtp.so", You can copy the header file rwtp.h from "include".
-
-To make a shared library of librope, run:
+To build libraries.
 
 ````
-make rope
+zig build --help
 ````
+For help.
 
-The production is "build/librope.so", which contains all functions from librwtp as well. You can copy the header file "rope.h" and "rwtp.h" from "include".
+````
+zig build test
+````
+To run tests.
 
 ## License
 Licensed under GNU General Public License, version 3.
