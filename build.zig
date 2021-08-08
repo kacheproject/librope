@@ -4,12 +4,18 @@ pub fn build(b: *std.build.Builder) void {
     // Standard release options allow the person running `zig build` to select
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall.
     const mode = b.standardReleaseOptions();
+    const cflags= [_][]const u8{"-Wall", "-g", "-std=c11"};
+
+    const asprintf_object = b.addObject("asprintf.o", null);
+    asprintf_object.addIncludeDir("include");
+    asprintf_object.linkLibC();
+    asprintf_object.addCSourceFile("src/asprintf.c", cflags[0..]);
     
     const rwtp_object = b.addObject("rwtp.o", null);
     rwtp_object.linkSystemLibrary("sodium");
     rwtp_object.linkSystemLibrary("msgpackc");
     rwtp_object.addIncludeDir("include");
-    rwtp_object.addCSourceFile("src/rwtp.c", &.{"-Wall", "-g"});
+    rwtp_object.addCSourceFile("src/rwtp.c", cflags[0..]);
 
     const rope_object = b.addObject("rope.o", null);
     rope_object.addIncludeDir("include");
@@ -17,11 +23,13 @@ pub fn build(b: *std.build.Builder) void {
     rope_object.linkSystemLibrary("msgpackc");
     rope_object.linkSystemLibrary("czmq");
     rope_object.addObject(rwtp_object);
-    rope_object.addCSourceFile("src/rope.c", &.{"-Wall", "-g"});
+    rope_object.addCSourceFile("src/rope.c", cflags[0..]);
+    rope_object.addCSourceFile("src/rwtp_ext.c", cflags[0..]);
 
     const librwtp_static = b.addStaticLibrary("rwtp_static", null);
     librwtp_static.addIncludeDir("include");
     librwtp_static.addObject(rwtp_object);
+    librwtp_static.addObject(asprintf_object);
     librwtp_static.linkLibC();
     librwtp_static.linkSystemLibrary("sodium");
     librwtp_static.linkSystemLibrary("msgpackc");
@@ -31,6 +39,7 @@ pub fn build(b: *std.build.Builder) void {
     const librope_static = b.addStaticLibrary("rope_static", null);
     librope_static.addIncludeDir("include");
     librope_static.addObject(rope_object);
+    librope_static.addObject(asprintf_object);
     librope_static.linkLibC();
     librope_static.linkLibrary(librwtp_static);
     librope_static.linkSystemLibrary("czmq");
@@ -39,7 +48,8 @@ pub fn build(b: *std.build.Builder) void {
 
     const librwtp = b.addSharedLibrary("rwtp", null, .unversioned);
     librwtp.addIncludeDir("include");
-    librwtp.addCSourceFile("src/rwtp.c", &.{"-Wall", "-g"});
+    librwtp.addCSourceFile("src/rwtp.c", cflags[0..]);
+    librwtp.addObject(asprintf_object);
     librwtp.linkLibC();
     librwtp.linkSystemLibrary("sodium");
     librwtp.linkSystemLibrary("msgpackc");
@@ -48,8 +58,10 @@ pub fn build(b: *std.build.Builder) void {
 
     const librope = b.addSharedLibrary("rope", null, .unversioned);
     librope.addIncludeDir("include");
-    librope.addCSourceFile("src/rwtp.c", &.{"-Wall", "-g"});
-    librope.addCSourceFile("src/rope.c", &.{"-Wall", "-g"});
+    librope.addCSourceFile("src/rwtp.c", cflags[0..]);
+    librope.addCSourceFile("src/rope.c", cflags[0..]);
+    librope.addCSourceFile("src/rwtp_ext.c", cflags[0..]);
+    librope.addObject(asprintf_object);
     librope.linkLibC();
     librope.linkSystemLibrary("sodium");
     librope.linkSystemLibrary("msgpackc");
@@ -63,7 +75,7 @@ pub fn build(b: *std.build.Builder) void {
     rope_test.addIncludeDir("tau");
     rope_test.linkLibC();
     rope_test.linkLibrary(librope_static);
-    rope_test.addCSourceFile("tests/rope/main.c", &.{"-Wall", "-g"});
+    rope_test.addCSourceFile("tests/rope/main.c", cflags[0..]);
     rope_test.linkSystemLibrary("sodium");
     rope_test.setBuildMode(.Debug);
     rope_test.install();
@@ -78,7 +90,7 @@ pub fn build(b: *std.build.Builder) void {
     rwtp_test.addIncludeDir("tau");
     rwtp_test.linkLibC();
     rwtp_test.linkLibrary(librwtp_static);
-    rwtp_test.addCSourceFile("tests/rwtp/main.c", &.{"-Wall", "-g"});
+    rwtp_test.addCSourceFile("tests/rwtp/main.c", cflags[0..]);
     rwtp_test.setBuildMode(.Debug);
     rwtp_test.install();
     const rwtp_test_run_step = rwtp_test.run();
