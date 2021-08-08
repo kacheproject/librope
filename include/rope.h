@@ -35,6 +35,7 @@ typedef struct rope_wire_state {
     uint64_t inactive_timepoint;
     uint64_t active_timeout;
     double latency;
+    int8_t handshake_stage;
 } rope_wire_state;
 
 typedef struct rope_wire {
@@ -74,7 +75,13 @@ void rope_wire_destroy(rope_wire *self);
 rope_wire *rope_wire_new_connect(char *endpoint, rope_sock_type type, rwtp_frame *network_key);
 rope_wire *rope_wire_new_bind(char *endpoint, rope_sock_type type, rwtp_frame *network_key);
 
-int rope_wire_send(rope_wire *self, rwtp_frame *f);
+void rope_wire_set_active(rope_wire *self);
+bool rope_wire_is_active(rope_wire *self);
+
+void rope_wire_start_handshake(rope_wire *self, bool rolling);
+bool rope_wire_is_handshake_completed(rope_wire *self);
+
+int rope_wire_send(rope_wire *self, const rwtp_frame *msg);
 rwtp_frame *rope_wire_recv_advanced(rope_wire *self, zsock_t *possible_sock);
 rwtp_frame *rope_wire_recv(rope_wire *self);
 
