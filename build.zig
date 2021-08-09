@@ -4,7 +4,7 @@ pub fn build(b: *std.build.Builder) void {
     // Standard release options allow the person running `zig build` to select
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall.
     const mode = b.standardReleaseOptions();
-    const cflags= [_][]const u8{"-Wall", "-g", "-std=c11"};
+    const cflags= [_][]const u8{"-Wall", "-Werror", "-g", "-std=c11", if (mode==.Debug) "-DDebug" else "-DRelease"};
 
     const asprintf_object = b.addObject("asprintf.o", null);
     asprintf_object.addIncludeDir("include");
@@ -22,7 +22,6 @@ pub fn build(b: *std.build.Builder) void {
     rope_object.linkSystemLibrary("sodium");
     rope_object.linkSystemLibrary("msgpackc");
     rope_object.linkSystemLibrary("czmq");
-    rope_object.linkSystemLibrary("zmq");
     rope_object.addObject(rwtp_object);
     rope_object.addCSourceFile("src/rope.c", cflags[0..]);
     rope_object.addCSourceFile("src/rwtp_ext.c", cflags[0..]);
@@ -67,7 +66,6 @@ pub fn build(b: *std.build.Builder) void {
     librope.linkSystemLibrary("sodium");
     librope.linkSystemLibrary("msgpackc");
     librope.linkSystemLibrary("czmq");
-    librope.linkSystemLibrary("zmq");
     librope.setBuildMode(mode);
     librope.install();
 
