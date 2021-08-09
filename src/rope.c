@@ -249,11 +249,11 @@ void rope_wire_start_handshake(rope_wire *self, bool rolling){
         rwtp_frame *set_pub_key_f = rwtp_session_send_set_pub_key(self->session, prik, iv);
         rwtp_frame_destroy(prik); rwtp_frame_destroy(iv);
         zmsg_t *set_pub_key_msg = rwtp_frame_to_zmsg(set_pub_key_f);
-        rwtp_frame_destroy_all(set_pub_key_f);
+        rwtp_frame_destroy(set_pub_key_f);
         zmsg_send(&set_pub_key_msg, self->sock);
         rwtp_frame *ask_pub_key_f = rwtp_session_send_ask_option(self->session, RWTP_OPTS_PUBKEY);
         zmsg_t *ask_pub_key_msg = rwtp_frame_to_zmsg(ask_pub_key_f);
-        rwtp_frame_destroy_all(ask_pub_key_f);
+        rwtp_frame_destroy(ask_pub_key_f);
         zmsg_send(&ask_pub_key_msg, self->sock);
         self->state.handshake_stage += 1;
     } else if (self->type == ROPE_SOCK_PUB){
@@ -261,7 +261,7 @@ void rope_wire_start_handshake(rope_wire *self, bool rolling){
         rwtp_frame *set_sec_key_f = rwtp_session_send_set_sec_key(self->session, seck);
         rwtp_frame_destroy(seck);
         zmsg_t *msg = rwtp_frame_to_zmsg(set_sec_key_f);
-        rwtp_frame_destroy_all(set_sec_key_f);
+        rwtp_frame_destroy(set_sec_key_f);
         zmsg_send(&msg, self->sock);
         self->state.handshake_stage += 1;
     }
@@ -302,7 +302,7 @@ int rope_wire_send(rope_wire *self, const rwtp_frame *msg){
     if (__rope_wire_send_plain(self, f)){
         return -1;
     }
-    rwtp_frame_destroy_all(f);
+    rwtp_frame_destroy(f);
     return 0;
 }
 
@@ -332,7 +332,7 @@ rwtp_frame *rope_wire_recv_advanced(rope_wire *self, zsock_t *possible_sock){
                     rwtp_frame *f = rwtp_session_send_set_pub_key(self->session, prik, iv);
                     rwtp_frame_destroy(prik); rwtp_frame_destroy(iv);
                     __rope_wire_send_plain(self, f);
-                    rwtp_frame_destroy_all(f);
+                    rwtp_frame_destroy(f);
                     self->state.handshake_stage++;
                 } else {
                     rope_wire_start_handshake(self, true);
@@ -342,11 +342,11 @@ rwtp_frame *rope_wire_recv_advanced(rope_wire *self, zsock_t *possible_sock){
                 rwtp_frame *f = rwtp_session_send_set_sec_key(self->session, seck);
                 rwtp_frame_destroy(seck);
                 __rope_wire_send_plain(self, f);
-                rwtp_frame_destroy_all(f);
+                rwtp_frame_destroy(f);
             } else if(result.opt == RWTP_OPTS_TIME){
                 rwtp_frame *f = rwtp_session_send_set_time(self->session, f);
                 __rope_wire_send_plain(self, f);
-                rwtp_frame_destroy_all(f);
+                rwtp_frame_destroy(f);
             }
         }
         return NULL;
@@ -389,7 +389,7 @@ int rope_wire_input(rope_wire *self, zsock_t *input){
     if (rope_wire_send(self, frames)){
         return -1;
     }
-    rwtp_frame_destroy_all(frames);
+    rwtp_frame_destroy(frames);
     return 0;
 }
 
@@ -398,14 +398,14 @@ int rope_wire_output(rope_wire *self, zsock_t *output){
     if (frames){
         zmsg_t *msg = rwtp_frame_to_zmsg(frames);
         if (!msg){
-            rwtp_frame_destroy_all(frames);
+            rwtp_frame_destroy(frames);
             return -1;
         }
         if (zmsg_send(&msg, output)){
-            rwtp_frame_destroy_all(frames);
+            rwtp_frame_destroy(frames);
             return -1;
         }
-        rwtp_frame_destroy_all(frames);
+        rwtp_frame_destroy(frames);
         return 0;
     } else {
         return -EAGAIN;
