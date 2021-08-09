@@ -132,7 +132,6 @@ rope_wire *rope_wire_init(rope_wire *self, char *address, rope_sock_type type,
         .state = (struct rope_wire_state){
             .active_timeout = 5,
             .handshake_stage = 0,
-            .inactive_timepoint = 0,
             .last_active_time = 0,
             .latency = -1,
         },
@@ -233,12 +232,11 @@ void rope_wire_set_active(rope_wire *self){
         self->state.active_timeout = 60;
     }
     self->state.last_active_time = time(NULL);
-    self->state.inactive_timepoint = self->state.last_active_time + self->state.active_timeout;
 }
 
 bool rope_wire_is_active(rope_wire *self){
     if (self->state.active_timeout == 0) return true;
-    return self->state.inactive_timepoint > self->state.last_active_time;
+    return time(NULL) > (self->state.last_active_time + self->state.active_timeout);
 }
 
 void rope_wire_start_handshake(rope_wire *self, bool rolling){

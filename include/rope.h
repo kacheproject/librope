@@ -32,7 +32,6 @@ int rope_router_connect(rope_router *self);
 
 typedef struct rope_wire_state {
     uint64_t last_active_time;
-    uint64_t inactive_timepoint;
     uint64_t active_timeout;
     double latency;
     int8_t handshake_stage;
