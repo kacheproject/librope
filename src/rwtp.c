@@ -340,8 +340,8 @@ static rwtp_session_read_result rwtp_session_read_setopt(rwtp_session *self, rwt
                    ivf->iovec_len != crypto_box_NONCEBYTES) {
             return (struct rwtp_session_read_result){-3};
         }
-        pub_keyf = rwtp_frame_clone(pub_keyf);
-        ivf = rwtp_frame_clone(ivf);
+        pub_keyf = rwtp_frame_copy(pub_keyf, 1);
+        ivf = rwtp_frame_copy(ivf, 1);
         pub_keyf->frame_next = ivf->frame_next = NULL;
         self->remote_public_key = pub_keyf;
         self->nonce_or_header = ivf;
@@ -591,6 +591,17 @@ rwtp_frame *rwtp_frame_clone(const rwtp_frame *self){
     if (self){
         rwtp_frame *copy = __rwtp_frame_clone(self);
         copy->frame_next = rwtp_frame_clone(self->frame_next);
+        return copy;
+    } else {
+        return NULL;
+    }
+}
+
+rwtp_frame *rwtp_frame_copy(const rwtp_frame *self, size_t n){
+    if (n > 0 && self){
+        rwtp_frame *copy = __rwtp_frame_clone(self);
+        if (!copy) return NULL;
+        copy->frame_next = rwtp_frame_copy(self->frame_next, n-1);
         return copy;
     } else {
         return NULL;

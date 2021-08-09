@@ -73,6 +73,9 @@ rwtp_frame *rwtp_frames_chain(rwtp_frame frames[], size_t frames_n);
 /* Clone the whole list of rwtp_frame. */
 rwtp_frame *rwtp_frame_clone(const rwtp_frame *self);
 
+/* Copy first n frames on the list as possible. */
+rwtp_frame *rwtp_frame_copy(const rwtp_frame *self, size_t n);
+
 /* Return false if self is NULL or self->iovec_len != size, and true otherwise. */
 bool rwtp_frame_check_size_fixed(rwtp_frame *self, size_t size);
 
