@@ -249,9 +249,11 @@ void rope_wire_start_handshake(rope_wire *self, bool rolling){
         rwtp_frame *set_pub_key_f = rwtp_session_send_set_pub_key(self->session, prik, iv);
         rwtp_frame_destroy(prik); rwtp_frame_destroy(iv);
         zmsg_t *set_pub_key_msg = rwtp_frame_to_zmsg(set_pub_key_f);
+        rwtp_frame_destroy_all(set_pub_key_f);
         zmsg_send(&set_pub_key_msg, self->sock);
         rwtp_frame *ask_pub_key_f = rwtp_session_send_ask_option(self->session, RWTP_OPTS_PUBKEY);
         zmsg_t *ask_pub_key_msg = rwtp_frame_to_zmsg(ask_pub_key_f);
+        rwtp_frame_destroy_all(ask_pub_key_f);
         zmsg_send(&ask_pub_key_msg, self->sock);
         self->state.handshake_stage += 1;
     } else if (self->type == ROPE_SOCK_PUB){
@@ -259,6 +261,7 @@ void rope_wire_start_handshake(rope_wire *self, bool rolling){
         rwtp_frame *set_sec_key_f = rwtp_session_send_set_sec_key(self->session, seck);
         rwtp_frame_destroy(seck);
         zmsg_t *msg = rwtp_frame_to_zmsg(set_sec_key_f);
+        rwtp_frame_destroy_all(set_sec_key_f);
         zmsg_send(&msg, self->sock);
         self->state.handshake_stage += 1;
     }
@@ -309,6 +312,7 @@ rwtp_frame *rope_wire_recv_advanced(rope_wire *self, zsock_t *possible_sock){
         rwtp_frame *st = rwtp_frame_from_zframe(zf);
         zframe_destroy(&zf);
         rwtp_session_read_result result = rwtp_session_read(self->session, st);
+        rwtp_frame_destroy(st);
         if (result.status_code == RWTP_DATA){
             return result.user_message;
         } else if (result.status_code == RWTP_SETOPT){

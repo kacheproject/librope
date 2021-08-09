@@ -49,6 +49,7 @@ TEST(rope_wire, p2p_wire){
         }
     }
 
+    zpoller_destroy(&poller);
     rope_wire_destroy(alice);
     rope_wire_destroy(bob);
 }
