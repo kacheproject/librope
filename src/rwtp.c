@@ -581,16 +581,16 @@ rwtp_frame *rwtp_frame_decrypt_single_seal(const rwtp_frame *self,
     return NULL;
 }
 
-rwtp_frame *rwtp_frame_clone(const rwtp_frame *self){
+static rwtp_frame *__rwtp_frame_clone(const rwtp_frame *self){
     rwtp_frame *copy = rwtp_frame_new(self->iovec_len, self->frame_next);
     memcpy(copy->iovec_data, self->iovec_data, self->iovec_len);
     return copy;
 }
 
-rwtp_frame *rwtp_frame_clone_all(rwtp_frame *self){
+rwtp_frame *rwtp_frame_clone(const rwtp_frame *self){
     if (self){
-        rwtp_frame *copy = rwtp_frame_clone(self);
-        copy->frame_next = rwtp_frame_clone_all(self->frame_next);
+        rwtp_frame *copy = __rwtp_frame_clone(self);
+        copy->frame_next = rwtp_frame_clone(self->frame_next);
         return copy;
     } else {
         return NULL;

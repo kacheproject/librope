@@ -70,8 +70,8 @@ rwtp_frame *rwtp_frame_last_of(rwtp_frame *self);
 
 rwtp_frame *rwtp_frames_chain(rwtp_frame frames[], size_t frames_n);
 
+/* Clone the whole list of rwtp_frame. */
 rwtp_frame *rwtp_frame_clone(const rwtp_frame *self);
-rwtp_frame *rwtp_frame_clone_all(rwtp_frame *self);
 
 /* Return false if self is NULL or self->iovec_len != size, and true otherwise. */
 bool rwtp_frame_check_size_fixed(rwtp_frame *self, size_t size);
