@@ -6,9 +6,17 @@ static const uint8_t RWTP_DATA = 0;
 static const uint8_t RWTP_SETOPT = 1;
 static const uint8_t RWTP_ASKOPT = 2;
 
+/* These control codes can be used by users for their special logic. */
+static const uint8_t RWTP_CTL_USER_START = 64;
+static const uint8_t RWTP_CTL_USER_END = 89;
+
 static const uint8_t RWTP_OPTS_PUBKEY = 1;
 static const uint8_t RWTP_OPTS_SECKEY = 2;
 static const uint8_t RWTP_OPTS_TIME = 3;
+
+/* These opts keys can be used by user for their special logic. */
+static const uint8_t RWTP_OPTS_USER_START = 64;
+static const uint8_t RWTP_OPTS_USER_END = 89;
 
 /* Initialise dependencies required by rwtp. You should call it at least once before any use of this library. 
 * Return -1 when failed.
@@ -172,7 +180,11 @@ typedef struct rwtp_session_read_result {
 * Assume result is a rwtp_session_read_result. result.status_code will be non-negative when operation successed,
 the number will be one of protocol control code: RWTP_DATA, RWTP_SETOPT, RWTP_ASKOPT.
 * result.status_code will be negative integer when error happens: -1: crypto error, -2: unknown control code, -3: bad message format.
-* result.user_message will be the pointer to message frames when status_code is RWTP_DATA.
+* result.user_message will be:
+* - the pointer to message frames when status_code is RWTP_DATA,
+* - the pointer to last part of message when status_code is in the range of [RWTP_CTL_USER_START, RWTP_CTL_USER_END],
+* - the pointer to arguments when status_code is RWTP_SETOPT and opt is in the range of [RWTP_OPTS_USER_START, RWTP_OPTS_USER_END].
+* Remember to release memory by rwtp_frame_destory.
 Caller own the value, they should apply rwtp_frame_destroy* on the frames when the pointer is non-null.
 * result.opt will be the option key when status_code is RWTP_SETOPT or RWTP_ASKOPT: RWTP_OPTS_PUBKEY.
 */

@@ -352,6 +352,7 @@ static void __rwtp_session_set_secret_key(rwtp_session *self, rwtp_frame *secret
 }
 
 static rwtp_session_read_result rwtp_session_read_setopt(rwtp_session *self, rwtp_frame *frames){
+    rwtp_frame *user_message = NULL;
     rwtp_frame *opt_key_frame = frames->frame_next;
     if (!rwtp_frame_check_size_fixed(opt_key_frame, sizeof(uint8_t))) {
         return (struct rwtp_session_read_result){-3};
@@ -398,10 +399,13 @@ static rwtp_session_read_result rwtp_session_read_setopt(rwtp_session *self, rwt
         }
         int64_t offest = local_time - remote_time;
         self->time_offest = offest;
+    } else if (opt_key >= RWTP_OPTS_USER_START && opt_key <= RWTP_OPTS_USER_END){
+        rwtp_frame *user_message = opt_key_frame->frame_next;
+        opt_key_frame->frame_next = NULL;
     } else {
         return (struct rwtp_session_read_result){-3};
     }
-    return (struct rwtp_session_read_result){RWTP_SETOPT, .opt = opt_key};
+    return (struct rwtp_session_read_result){RWTP_SETOPT, .opt = opt_key, .user_message=user_message};
 }
 
 static rwtp_session_read_result rwtp_session_read_askopt(rwtp_session *self,
@@ -409,7 +413,8 @@ static rwtp_session_read_result rwtp_session_read_askopt(rwtp_session *self,
     rwtp_frame *opt_keyf = frames->frame_next;
     if (rwtp_frame_check_size_fixed(opt_keyf, sizeof(uint8_t))) {
         uint8_t opt_key = *((uint8_t *)opt_keyf->iovec_data);
-        if (opt_key < RWTP_OPTS_PUBKEY && opt_key > RWTP_OPTS_PUBKEY) {
+        if (opt_key < RWTP_OPTS_PUBKEY && opt_key > RWTP_OPTS_PUBKEY &&
+            opt_key < RWTP_OPTS_USER_START && opt_key > RWTP_OPTS_USER_END) {
             return (struct rwtp_session_read_result){-3};
         }
         return (struct rwtp_session_read_result){RWTP_ASKOPT, .opt = opt_key};
@@ -432,13 +437,20 @@ rwtp_session_read_result rwtp_session_read(rwtp_session *self, const rwtp_frame 
     }
     uint8_t ctl_code = *((uint8_t*) frames->iovec_data);
 
-    rwtp_session_read_result result;
+    rwtp_session_read_result result = {};
     if (ctl_code == RWTP_DATA){
         result = rwtp_session_read_data(self, frames);
     } else if (ctl_code == RWTP_SETOPT){
         result = rwtp_session_read_setopt(self, frames);
     } else if (ctl_code == RWTP_ASKOPT){
         result = rwtp_session_read_askopt(self, frames);
+    } else if (ctl_code >= RWTP_CTL_USER_START && ctl_code <= RWTP_CTL_USER_END){
+        result = (struct rwtp_session_read_result){
+            .status_code = ctl_code,
+            .opt = 0,
+            .user_message = frames->frame_next,
+        };
+        frames->frame_next = NULL;
     } else {
         result = (struct rwtp_session_read_result){-2};
     }
