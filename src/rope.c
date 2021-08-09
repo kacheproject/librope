@@ -187,7 +187,6 @@ rope_wire *rope_wire_new_connect(char *endpoint, rope_sock_type type, rwtp_frame
 
     rope_wire *wire = rope_wire_new(sock, endpoint, type, NULL, session);
     NonNullOrGoToErrCleanup(wire);
-    free(endpoint); endpoint = NULL;
     return wire;
 
     errcleanup:
@@ -280,9 +279,6 @@ static int __rope_wire_send_plain(rope_wire *self, const rwtp_frame *f) {
     while (curr) {
         zframe_t *zf = rwtp_frame_to_zframe(curr);
         if (zf) {
-            if (self->type == ROPE_SOCK_P2P){
-                zmq_send(zsock_resolve(self->sock), NULL, 0, ZMQ_MORE); /* The DEALER socket requires */
-            }
             if(zframe_send(&zf, self->sock, 0)){
                 zframe_destroy(&zf);
                 return -1;
@@ -290,6 +286,7 @@ static int __rope_wire_send_plain(rope_wire *self, const rwtp_frame *f) {
         } else {
             return -1;
         }
+        curr = curr->frame_next;
     }
 }
 
@@ -332,6 +329,7 @@ rwtp_frame *rope_wire_recv_advanced(rope_wire *self, zsock_t *possible_sock){
                     rwtp_frame_destroy(prik); rwtp_frame_destroy(iv);
                     __rope_wire_send_plain(self, f);
                     rwtp_frame_destroy_all(f);
+                    self->state.handshake_stage++;
                 } else {
                     rope_wire_start_handshake(self, true);
                 }

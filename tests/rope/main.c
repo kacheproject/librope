@@ -48,4 +48,7 @@ TEST(rope_wire, p2p_wire){
             REQUIRE(!user_message);
         }
     }
+
+    rope_wire_destroy(alice);
+    rope_wire_destroy(bob);
 }
