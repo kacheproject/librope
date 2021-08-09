@@ -83,11 +83,6 @@ rwtp_frame *rwtp_frame_new(size_t iovec_len, rwtp_frame *frame_next) {
 }
 
 void rwtp_frame_destroy(rwtp_frame *self) {
-    rwtp_frame_deinit(self);
-    free(self);
-}
-
-void rwtp_frame_destroy_all(rwtp_frame *self) {
     /* We could not have rwtp_frame_deinit_all here, because the rwtp_frame_deinit comes with rwtp_frame_reset,
     * which will empty the structure and empty the frame_next field. (Rubicon 31/Jul./2021) */
     if (!self){
@@ -97,6 +92,10 @@ void rwtp_frame_destroy_all(rwtp_frame *self) {
     rwtp_frame_deinit(self);
     free(self);
     return rwtp_frame_destroy_all(next);
+}
+
+void rwtp_frame_destroy_all(rwtp_frame *self) {
+    rwtp_frame_destroy(self);
 }
 
 void rwtp_frame_reset(rwtp_frame *self) {

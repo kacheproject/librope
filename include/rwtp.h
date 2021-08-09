@@ -53,9 +53,9 @@ void rwtp_frame_deinit_all(rwtp_frame *self);
 * See rwtp_frame_init for on-stack structure initialising.
 */
 rwtp_frame *rwtp_frame_new(size_t iovec_len, rwtp_frame *frame_next);
-/* Deinitialise and destroy one rwtp_frame structure. See rwtp_frame_new. */
+/* Deinitialise and destroy all rwtp_frame structure on the chain. See rwtp_frame_new. */
 void rwtp_frame_destroy(rwtp_frame *self);
-/* Deinitialise and destroy all structures on the chain. See rwtp_frame_new. */
+/* Deprecated. Alias of rwtp_frame_destroy. Will be removed in version 0.2. See rwtp_frame_new, rwtp_frame_destroy. */
 void rwtp_frame_destroy_all(rwtp_frame *self);
 
 /* Reset the values in the structure. THIS IS NOT DECONSTRUCTING!
