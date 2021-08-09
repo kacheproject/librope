@@ -400,7 +400,7 @@ static rwtp_session_read_result rwtp_session_read_setopt(rwtp_session *self, rwt
         int64_t offest = local_time - remote_time;
         self->time_offest = offest;
     } else if (opt_key >= RWTP_OPTS_USER_START && opt_key <= RWTP_OPTS_USER_END){
-        rwtp_frame *user_message = opt_key_frame->frame_next;
+        user_message = opt_key_frame->frame_next;
         opt_key_frame->frame_next = NULL;
     } else {
         return (struct rwtp_session_read_result){-3};
@@ -459,7 +459,7 @@ rwtp_session_read_result rwtp_session_read(rwtp_session *self, const rwtp_frame 
     return result;
 }
 
-rwtp_frame *rwtp_session_send_raw(rwtp_session *self, const rwtp_frame *frames){
+rwtp_frame *rwtp_session_send_raw(const rwtp_session *self, const rwtp_frame *frames){
     rwtp_frame *blk = rwtp_frame_pack_frames(frames);
     if (blk){
         rwtp_frame *result = rwtp_session_encrypt_single(self, blk);
@@ -470,19 +470,19 @@ rwtp_frame *rwtp_session_send_raw(rwtp_session *self, const rwtp_frame *frames){
     }
 }
 
-rwtp_frame *rwtp_session_send(rwtp_session *self, rwtp_frame *raw){
+rwtp_frame *rwtp_session_send(rwtp_session *self, const rwtp_frame *raw){
     rwtp_frame head = {
         .iovec_data = (uint8_t*)&RWTP_DATA,
         .iovec_len = sizeof(uint8_t),
-        .frame_next = raw,
+        .frame_next = (rwtp_frame *)raw,
     };
     return rwtp_session_send_raw(self, &head);
 }
 
-rwtp_frame *rwtp_session_send_set_option(rwtp_session *self, uint8_t opt, const rwtp_frame *arguments){
+rwtp_frame *rwtp_session_send_set_option(const rwtp_session *self, uint8_t opt, const rwtp_frame *arguments){
     rwtp_frame message[2] = {
         {(uint8_t*)&RWTP_SETOPT, sizeof(uint8_t)},
-        {(uint8_t*)&opt, sizeof(uint8_t), .frame_next=arguments},
+        {(uint8_t*)&opt, sizeof(uint8_t), .frame_next=(rwtp_frame *)arguments},
     };
     rwtp_frames_chain(message, 2);
     return rwtp_session_send_raw(self, message);
@@ -561,7 +561,7 @@ rwtp_frame *rwtp_session_send_set_time(const rwtp_session *self, int64_t time){
     return result;
 }
 
-rwtp_frame *rwtp_session_send_ask_option(rwtp_session *self, uint8_t option){
+rwtp_frame *rwtp_session_send_ask_option(const rwtp_session *self, uint8_t option){
     rwtp_frame message[2] = {
         {(uint8_t*)&RWTP_ASKOPT, sizeof(uint8_t)},
         {(uint8_t*)&option, sizeof(uint8_t)},

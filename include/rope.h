@@ -94,6 +94,7 @@ typedef struct rope_pin {
     rope_router *router;
     rwtp_frame *remote_id;
     khash_t(str) *wires; // char * to rope_wire *
+    khash_t(ptr) *sockets; // zsock_t * or zactor_t * to rope_wire *
     rope_wire *proxy; 
     rope_wire *selected_wire;
 } rope_pin;
@@ -104,6 +105,15 @@ rope_pin *rope_pin_new(rope_router *router, char *proxy_binding_addr, rope_sock_
 void rope_pin_destroy(rope_pin *self);
 
 void rope_pin_merge(rope_pin *self, rope_pin *src);
+
+/* Select a wire. Return NULL if no one fits. */
+rope_wire *rope_pin_select_wire(rope_pin *self);
+
+/* Handle input from sock. Return -EPERM if failed, -EAGAIN if could not could not proxy message. */
+int rope_pin_handle(rope_pin *self, zsock_t *sock);
+
+/* Add a rope_wire. Callee owns arguments. */
+int rope_pin_add_wire(rope_pin *self, rope_wire *wires);
 
 /* Extension to rwtp library */
 

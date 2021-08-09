@@ -190,10 +190,10 @@ Caller own the value, they should apply rwtp_frame_destroy* on the frames when t
 */
 rwtp_session_read_result rwtp_session_read(rwtp_session *self, const rwtp_frame *raw_single);
 
-rwtp_frame *rwtp_session_send(rwtp_session *self, rwtp_frame *raw);
+rwtp_frame *rwtp_session_send(rwtp_session *self, const rwtp_frame *raw);
 
 /* Pack and encrypt frames. Caller owns arguments. */
-rwtp_frame *rwtp_session_send_raw(rwtp_session *self, const rwtp_frame *raw);
+rwtp_frame *rwtp_session_send_raw(const rwtp_session *self, const rwtp_frame *raw);
 
 /* Create a message to set PUBKEY option. Callee owns arguments. */
 rwtp_frame *rwtp_session_send_set_pub_key(rwtp_session *self, rwtp_frame *self_private_key, rwtp_frame *iv);
@@ -203,10 +203,10 @@ rwtp_frame *rwtp_session_send_set_sec_key(rwtp_session *self, rwtp_frame *secret
 
 rwtp_frame *rwtp_session_send_set_time(const rwtp_session *self, int64_t time);
 
-rwtp_frame *rwtp_session_send_ask_option(rwtp_session *self, uint8_t opt);
+rwtp_frame *rwtp_session_send_ask_option(const rwtp_session *self, uint8_t opt);
 
 /* Create a SETOPT message. Caller owns arguments. */
-rwtp_frame *rwtp_session_send_set_option(rwtp_session *self, uint8_t opt, const rwtp_frame *arguments);
+rwtp_frame *rwtp_session_send_set_option(const rwtp_session *self, uint8_t opt, const rwtp_frame *arguments);
 
 rwtp_session *rwtp_session_init(rwtp_session *self, const rwtp_frame *network_key);
 void rwtp_session_deinit(rwtp_session *self);

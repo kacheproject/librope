@@ -7,7 +7,7 @@
 #include <zmq.h>
 
 #define NonNullOrGoToErrCleanup(v)                                             \
-    if (!v)                                                                    \
+    if (!(v))                                                                    \
     goto errcleanup
 
 #define New(type) malloc(sizeof(type))
@@ -52,9 +52,14 @@ static char *endpoint_replace_port(const char *endpoint, int port){
 rope_router *rope_router_init(rope_router *self, rwtp_frame *self_id,
                               rwtp_frame *network_key) {
     khash_t(ptr) *pins = kh_init(ptr);
-    NonNullOrGoToErrCleanup(pins);
+    if (!pins){
+        return NULL;
+    }
     zpoller_t *poller = zpoller_new(NULL);
-    NonNullOrGoToErrCleanup(poller);
+    if (!poller){
+        kh_destroy(ptr, pins);
+        return NULL;
+    }
     *self = (struct rope_router){
         .self_id = self_id,
         .network_key = network_key,
@@ -62,15 +67,6 @@ rope_router *rope_router_init(rope_router *self, rwtp_frame *self_id,
         .poller = poller,
     };
     return self;
-
-errcleanup:
-    if (pins) {
-        kh_destroy(ptr, pins);
-    }
-    if (poller) {
-        zpoller_destroy(&poller);
-    }
-    return NULL;
 }
 
 void rope_router_deinit(rope_router *self) {
@@ -96,6 +92,58 @@ rope_router *rope_router_new(rwtp_frame *self_id, rwtp_frame *network_key) {
 void rope_router_destroy(rope_router *self) {
     rope_router_deinit(self);
     free(self);
+}
+
+int rope_router_poll(rope_router *self, int timeout) {
+    zsock_t *sock = zpoller_wait(self->poller, timeout);
+    if (!sock) {
+        if (zpoller_terminated(self->poller)) {
+            return -ETERM;
+        } else {
+            return -EAGAIN;
+        }
+    }
+    khiter_t pin_iter = kh_get(ptr, self->pins, sock);
+    if (pin_iter == kh_end(self->pins)) {
+        return -ENOKEY;
+    }
+    if (rope_pin_handle(kh_val(self->pins, pin_iter), sock)) {
+        return -EPERM;
+    }
+    return 0;
+}
+
+static void rope_router_poll_actor(zsock_t *pipe, void *arg){
+    rope_router *self = arg;
+    if(zpoller_add(self->poller, pipe)){
+        zsock_signal(pipe, -1);
+        return;
+    }
+    zsock_signal(pipe, 0);
+    int ret;
+    while (true){
+        ret = rope_router_poll(self, -1);
+        if (ret == -ENOKEY || ret == -ETERM){
+            break;
+        }
+    }
+    zpoller_remove(self->poller, pipe);
+}
+
+int rope_router_start_poll_thread(rope_router *self){
+    if (self->poll_actor) return -EPERM;
+    self->poll_actor = zactor_new(&rope_router_poll_actor, self);
+    if (!self->poll_actor){
+        return -EPERM;
+    } else {
+        return 0;
+    }
+}
+
+void rope_router_stop_poll_thread(rope_router *self){
+    if (!self->poll_actor) return;
+    zactor_destroy(&self->poll_actor);
+    self->poll_actor = NULL;
 }
 
 static int rope_wire_type_to_zmq_type(rope_sock_type type) {
@@ -174,13 +222,15 @@ void rope_wire_destroy(rope_wire *self) {
 }
 
 rope_wire *rope_wire_new_connect(char *endpoint, rope_sock_type type, rwtp_frame *network_key){
+    rwtp_session *session = NULL;
+    zsock_t *sock = NULL;
     NonNullOrGoToErrCleanup(network_key);
-    zsock_t *sock = zsock_new(rope_wire_type_to_zmq_type(type));
-    if (zsock_connect(sock, endpoint) < 0){
+    sock = zsock_new(rope_wire_type_to_zmq_type(type));
+    if (zsock_connect(sock, "%s", endpoint) < 0){
         zsys_error("rope_wire_new_connect: connect failed \"%s\"", endpoint);
         goto errcleanup;
     }
-    rwtp_session *session = rwtp_session_new(network_key);
+    session = rwtp_session_new(network_key);
     NonNullOrGoToErrCleanup(session);
     rwtp_frame_destroy(network_key); network_key = NULL;
 
@@ -197,15 +247,19 @@ rope_wire *rope_wire_new_connect(char *endpoint, rope_sock_type type, rwtp_frame
 }
 
 rope_wire *rope_wire_new_bind(char *endpoint, rope_sock_type type, rwtp_frame *network_key){
+    char *complete_endpoint = NULL;
+    zsock_t *sock = NULL;
+    rwtp_session *session = NULL;
+
     NonNullOrGoToErrCleanup(network_key);
-    zsock_t *sock = zsock_new(rope_wire_type_to_zmq_type(type));
+    sock = zsock_new(rope_wire_type_to_zmq_type(type));
     int port;
-    if ((port = zsock_bind(sock, endpoint)) < 0){
+    if ((port = zsock_bind(sock, "%s", endpoint)) < 0){
         goto errcleanup;
     }
-    char *complete_endpoint = endpoint_replace_port(endpoint, port);
+    complete_endpoint = endpoint_replace_port(endpoint, port);
     NonNullOrGoToErrCleanup(complete_endpoint);
-    rwtp_session *session = rwtp_session_new(network_key);
+    session = rwtp_session_new(network_key);
     NonNullOrGoToErrCleanup(session);
     rwtp_frame_destroy(network_key); network_key = NULL;
 
@@ -270,11 +324,13 @@ bool rope_wire_is_handshake_completed(rope_wire *self){
         return true;
     } else if (self->type == ROPE_SOCK_SUB){
         return self->state.handshake_stage >= 1;
+    } else {
+        return false;
     }
 }
 
 static int __rope_wire_send_plain(rope_wire *self, const rwtp_frame *f) {
-    rwtp_frame *curr = f;
+    rwtp_frame *curr = (rwtp_frame *)f;
     while (curr) {
         zframe_t *zf = rwtp_frame_to_zframe(curr);
         if (zf) {
@@ -287,6 +343,7 @@ static int __rope_wire_send_plain(rope_wire *self, const rwtp_frame *f) {
         }
         curr = curr->frame_next;
     }
+    return 0;
 }
 
 int rope_wire_send(rope_wire *self, const rwtp_frame *msg){
@@ -294,7 +351,7 @@ int rope_wire_send(rope_wire *self, const rwtp_frame *msg){
         rope_wire_start_handshake(self, false);
         return -EAGAIN;
     }
-    rwtp_frame *f = rwtp_session_send(self, msg);
+    rwtp_frame *f = rwtp_session_send(self->session, msg);
     if (__rope_wire_send_plain(self, f)){
         return -1;
     }
@@ -338,16 +395,19 @@ rwtp_frame *rope_wire_recv_advanced(rope_wire *self, zsock_t *possible_sock){
                 __rope_wire_send_plain(self, f);
                 rwtp_frame_destroy(f);
             } else if(result.opt == RWTP_OPTS_TIME){
-                rwtp_frame *f = rwtp_session_send_set_time(self->session, f);
+                rwtp_frame *f = rwtp_session_send_set_time(self->session, time(NULL));
                 __rope_wire_send_plain(self, f);
                 rwtp_frame_destroy(f);
             }
         }
         return NULL;
-    } else if (possible_sock == self->monitor){
+    } else if (possible_sock == (zsock_t *)self->monitor){
         /* When connection status changed */
+        return NULL;
     }
+    return NULL;
 }
+
 rwtp_frame *rope_wire_recv(rope_wire *self){
     return rope_wire_recv_advanced(self, NULL);
 }
@@ -359,6 +419,7 @@ int rope_wire_zpoller_add(rope_wire *self, zpoller_t *poller){
     if (zpoller_add(poller, self->monitor)){
         return -1;
     }
+    return 0;
 }
 
 int rope_wire_zpoller_rm(rope_wire *self, zpoller_t *poller){
@@ -368,6 +429,7 @@ int rope_wire_zpoller_rm(rope_wire *self, zpoller_t *poller){
     if (zpoller_remove(poller, self->monitor)){
         return -1;
     }
+    return 0;
 }
 
 int rope_wire_input(rope_wire *self, zsock_t *input){
@@ -409,20 +471,27 @@ int rope_wire_output(rope_wire *self, zsock_t *output){
 /* Pin */
 rope_pin *rope_pin_init(rope_pin *self, rope_router *router,
                         char *proxy_binding_addr, rope_sock_type type) {
-    khash_t(str) *wires = kh_init(str);
+    khash_t(str) *wires = NULL;
+    khash_t(ptr) *sockets = NULL;
+    rope_wire *proxy = NULL;
+
+    wires = kh_init(str);
     NonNullOrGoToErrCleanup(wires);
+    sockets = kh_init(ptr);
+    NonNullOrGoToErrCleanup(sockets);
     rope_sock_type proxy_type = type;
     if (type == ROPE_SOCK_PUB) {
         proxy_type = ROPE_SOCK_SUB;
     } else if (type == ROPE_SOCK_SUB) {
         proxy_type = ROPE_SOCK_PUB;
     }
-    rope_wire *proxy = rope_wire_new_bind(proxy_binding_addr, proxy_type, rwtp_frame_clone(router->network_key));
+    proxy = rope_wire_new_bind(proxy_binding_addr, proxy_type, rwtp_frame_clone(router->network_key));
     NonNullOrGoToErrCleanup(proxy);
 
     *self = (struct rope_pin){
         .router = router,
         .wires = wires,
+        .sockets = sockets,
         .proxy = proxy,
         .remote_id = NULL,
         .selected_wire = NULL,
@@ -436,6 +505,8 @@ errcleanup:
         kh_destroy(str, wires);
     if (proxy)
         rope_wire_destroy(proxy);
+    if (sockets)
+        kh_destroy(ptr, sockets);
     return NULL;
 }
 
@@ -464,4 +535,81 @@ rope_pin *rope_pin_new(rope_router *router, char *proxy_binding_addr,
 void rope_pin_destroy(rope_pin *self) {
     rope_pin_deinit(self);
     free(self);
+}
+
+rope_wire *rope_pin_select_wire(rope_pin *self){
+    /* TODO: better wire-selecting algorithm */
+    rope_wire *longest_uptime_wire = NULL;
+    {
+        rope_wire *curr = NULL;
+        kh_foreach_value(self->wires, curr, {
+            if (rope_wire_is_active(curr)){
+                if (!longest_uptime_wire){
+                    longest_uptime_wire = curr;
+                } else if (longest_uptime_wire->state.last_active_time < curr->state.last_active_time){
+                    longest_uptime_wire = curr;
+                }
+            }
+        });
+    }
+    self->selected_wire = longest_uptime_wire;
+    return longest_uptime_wire;
+}
+
+int rope_pin_handle(rope_pin *self, zsock_t *sock){
+    if (sock == self->proxy->sock){
+        if (!rope_pin_select_wire(self)){
+            return -EAGAIN;
+        }
+        zmsg_t *msg = zmsg_recv(sock);
+        if (!msg){
+            return -EPERM;
+        }
+        rwtp_frame *frames = rwtp_frame_from_zmsg(msg);
+        if (!frames){
+            return -EPERM;
+        }
+        zmsg_destroy(&msg);
+        if (rope_wire_send(self->selected_wire, frames)){
+            return -EPERM;
+        }
+        rwtp_frame_destroy(frames);
+    } else if (sock == (zsock_t *)self->proxy->monitor){
+        /* Do nothing */
+    } else {
+        khiter_t wire_iter = kh_get(ptr, self->sockets, sock);
+        if (wire_iter == kh_end(self->sockets)){
+            return -EPERM;
+        }
+        rope_wire *wire = kh_val(self->sockets, wire_iter);
+        rope_wire_set_active(wire);
+        if (rope_wire_output(wire, self->proxy->sock)){
+            return -EPERM;
+        }
+    }
+    return 0;
+}
+
+int rope_pin_add_wire(rope_pin *self, rope_wire *wire){
+    int ret;
+    khiter_t k;
+    k = kh_put(str, self->wires, wire->address, &ret);
+    NonNullOrGoToErrCleanup(ret != -1);
+    kh_val(self->wires, k) = wire;
+    k = kh_put(ptr, self->sockets, wire->sock, &ret);
+    NonNullOrGoToErrCleanup(ret != -1);
+    kh_val(self->sockets, k) = wire;
+    k = kh_put(ptr, self->sockets, wire->monitor, &ret);
+    NonNullOrGoToErrCleanup(ret != -1);
+    kh_val(self->sockets, k) = wire;
+    NonNullOrGoToErrCleanup(!rope_wire_zpoller_add(wire, self->router->poller));
+    return 0;
+
+    errcleanup:
+    if ((k = kh_get(str, self->wires, wire->address)) != kh_end(self->wires)) kh_del(str, self->wires, k);
+    if ((k = kh_get(ptr, self->sockets, wire->sock)) != kh_end(self->wires)) kh_del(ptr, self->sockets, k);
+    if ((k = kh_get(ptr, self->sockets, wire->monitor)) != kh_end(self->sockets)) kh_del(ptr, self->sockets, k);
+    rope_wire_zpoller_rm(wire, self->router->poller);
+    rope_wire_destroy(wire);
+    return -EPERM;
 }

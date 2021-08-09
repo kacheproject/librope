@@ -20,6 +20,16 @@ TEST(rope_router, init_and_deinit){
     rwtp_frame_destroy(self_id);
 }
 
+TEST(rope_router, poll_thread_start_and_stop){
+    rope_router router0;
+    zuuid_t *uuid = zuuid_new();
+    rwtp_frame *self_id = rwtp_frame_from_zuuid(&uuid);
+    rope_router_init(&router0, self_id, rwtp_frame_gen_network_key());
+    rope_router_start_poll_thread(&router0);
+    rope_router_stop_poll_thread(&router0);
+    rope_router_deinit(&router0);
+}
+
 TEST(rope_wire, init_and_deinit){
     rope_wire *wire = rope_wire_new_bind(strdup("tcp://127.0.0.1:!"), ROPE_SOCK_P2P, rwtp_frame_gen_network_key());
     REQUIRE_STRNE(wire->address, "tcp://127.0.0.1:!"); /* rope_wire_new_{bind, connect} should replace the port with actual port. */
@@ -40,7 +50,7 @@ TEST(rope_wire, p2p_wire){
 
     while (!(rope_wire_is_handshake_completed(alice) && rope_wire_is_handshake_completed(bob))){
         zsock_t *sock = zpoller_wait(poller, -1);
-        if (sock == alice->sock || sock == alice->monitor){
+        if (sock == alice->sock || sock == (zsock_t *)alice->monitor){
             rwtp_frame *user_message = rope_wire_recv_advanced(alice, sock);
             REQUIRE(!user_message);
         } else {
