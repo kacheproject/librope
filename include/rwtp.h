@@ -73,7 +73,7 @@ rwtp_frame *rwtp_frames_chain(rwtp_frame frames[], size_t frames_n);
 /* Clone the whole list of rwtp_frame. */
 rwtp_frame *rwtp_frame_clone(const rwtp_frame *self);
 
-/* Copy first n frames on the list as possible. */
+/* Copy first n frames on the list as possible. The .frame_next of last frame will be NULL. */
 rwtp_frame *rwtp_frame_copy(const rwtp_frame *self, size_t n);
 
 /* Return false if self is NULL or self->iovec_len != size, and true otherwise. */
@@ -180,18 +180,20 @@ rwtp_session_read_result rwtp_session_read(rwtp_session *self, const rwtp_frame 
 
 rwtp_frame *rwtp_session_send(rwtp_session *self, rwtp_frame *raw);
 
-/* Pack and encrypt frames raw. */
+/* Pack and encrypt frames. Caller owns arguments. */
 rwtp_frame *rwtp_session_send_raw(rwtp_session *self, const rwtp_frame *raw);
 
-rwtp_frame *rwtp_session_send_set_pub_key(rwtp_session *self, const rwtp_frame *self_private_key, const rwtp_frame *iv);
+/* Create a message to set PUBKEY option. Callee owns arguments. */
+rwtp_frame *rwtp_session_send_set_pub_key(rwtp_session *self, rwtp_frame *self_private_key, rwtp_frame *iv);
 
-rwtp_frame *rwtp_session_send_set_sec_key(rwtp_session *self, const rwtp_frame *secret_key);
+/* Create a message to set SECKEY option. Callee owns arguments. */
+rwtp_frame *rwtp_session_send_set_sec_key(rwtp_session *self, rwtp_frame *secret_key);
 
 rwtp_frame *rwtp_session_send_set_time(const rwtp_session *self, int64_t time);
 
 rwtp_frame *rwtp_session_send_ask_option(rwtp_session *self, uint8_t opt);
 
-/* Create a SETOPT message. */
+/* Create a SETOPT message. Caller owns arguments. */
 rwtp_frame *rwtp_session_send_set_option(rwtp_session *self, uint8_t opt, const rwtp_frame *arguments);
 
 rwtp_session *rwtp_session_init(rwtp_session *self, const rwtp_frame *network_key);

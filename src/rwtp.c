@@ -325,6 +325,28 @@ static rwtp_session_read_result rwtp_session_read_data(rwtp_session *self, rwtp_
     return (struct rwtp_session_read_result){RWTP_DATA, user_frame_head};
 }
 
+static void __rwtp_session_set_public_key(rwtp_session *self, rwtp_frame *public_key, rwtp_frame *iv){
+    if (self->remote_public_key){
+        rwtp_frame_destroy(self->remote_public_key);
+    }
+    if (self->nonce_or_header){
+        rwtp_frame_destroy(self->nonce_or_header);
+    }
+    self->remote_public_key = public_key;
+    self->nonce_or_header = iv;
+}
+
+static void __rwtp_session_set_secret_key(rwtp_session *self, rwtp_frame *secret_key, rwtp_frame *header){
+    if (self->secret_key){
+        rwtp_frame_destroy(self->secret_key);
+    }
+    if (self->nonce_or_header){
+        rwtp_frame_destroy(self->nonce_or_header);
+    }
+    self->secret_key = secret_key;
+    self->nonce_or_header = header;
+}
+
 static rwtp_session_read_result rwtp_session_read_setopt(rwtp_session *self, rwtp_frame *frames){
     rwtp_frame *opt_key_frame = frames->frame_next;
     if (!rwtp_frame_check_size_fixed(opt_key_frame, sizeof(uint8_t))) {
@@ -342,9 +364,7 @@ static rwtp_session_read_result rwtp_session_read_setopt(rwtp_session *self, rwt
         }
         pub_keyf = rwtp_frame_copy(pub_keyf, 1);
         ivf = rwtp_frame_copy(ivf, 1);
-        pub_keyf->frame_next = ivf->frame_next = NULL;
-        self->remote_public_key = pub_keyf;
-        self->nonce_or_header = ivf;
+        __rwtp_session_set_public_key(self, pub_keyf, ivf);
     } else if (opt_key == RWTP_OPTS_SECKEY && !self->remote_public_key) {
         rwtp_frame *sec_keyf, *headerf;
         if (!(sec_keyf = opt_key_frame->frame_next) ||
@@ -358,9 +378,7 @@ static rwtp_session_read_result rwtp_session_read_setopt(rwtp_session *self, rwt
         }
         sec_keyf = rwtp_frame_clone(sec_keyf);
         headerf = rwtp_frame_clone(headerf);
-        sec_keyf->frame_next = headerf->frame_next = NULL;
-        self->secret_key = sec_keyf;
-        self->nonce_or_header = headerf;
+        __rwtp_session_set_secret_key(self, sec_keyf, headerf);
     } else if (opt_key == RWTP_OPTS_TIME) {
         rwtp_frame *timef;
         if (!(timef = opt_key_frame->frame_next)) {
@@ -454,11 +472,9 @@ rwtp_frame *rwtp_session_send_set_option(rwtp_session *self, uint8_t opt, const 
     return rwtp_session_send_raw(self, message);
 }
 
-rwtp_frame *rwtp_session_send_set_sec_key(rwtp_session *self, const rwtp_frame *secret_key){
+rwtp_frame *rwtp_session_send_set_sec_key(rwtp_session *self, rwtp_frame *secret_key){
     assert(!rwtp_session_check_public_key_mode(self)); // Should not in public-key mode
     assert(self->secret_key->iovec_len == crypto_secretstream_xchacha20poly1305_KEYBYTES);
-
-    rwtp_frame *dup_secret_key = rwtp_frame_clone((rwtp_frame*)secret_key);
 
     self->nonce_or_header = rwtp_frame_new(crypto_secretstream_xchacha20poly1305_HEADERBYTES, NULL);
     if (!self->nonce_or_header){
@@ -478,28 +494,22 @@ rwtp_frame *rwtp_session_send_set_sec_key(rwtp_session *self, const rwtp_frame *
     }
 
     rwtp_frame args[2] = {
-        *dup_secret_key,
+        *secret_key,
         *(self->nonce_or_header),
     };
     rwtp_frames_chain(args, 2);
     rwtp_frame *result = rwtp_session_send_set_option(self, RWTP_OPTS_SECKEY, args);
 
-    self->secret_key = dup_secret_key;
+    self->secret_key = secret_key;
     return result;
 }
 
 rwtp_frame *rwtp_session_send_set_pub_key(rwtp_session *self,
-                                          const rwtp_frame *self_private_key,
-                                          const rwtp_frame *iv) {
+                                          rwtp_frame *self_private_key,
+                                          rwtp_frame *iv) {
     assert(!rwtp_session_check_secret_key_mode(self)); // Should not in secret-key mode
     assert(self_private_key->iovec_len == crypto_box_SECRETKEYBYTES);
     assert(iv->iovec_len == crypto_box_NONCEBYTES);
-
-    rwtp_frame *self_private_key_dup = rwtp_frame_clone(self_private_key);
-    rwtp_frame *iv_dup = rwtp_frame_clone(iv);
-    if (!self_private_key_dup || !iv_dup){
-        return NULL;
-    }
 
     unsigned char pk[crypto_box_PUBLICKEYBYTES];
     crypto_scalarmult_base(pk, self_private_key->iovec_data);
@@ -511,14 +521,14 @@ rwtp_frame *rwtp_session_send_set_pub_key(rwtp_session *self,
     rwtp_frames_chain(args, 2);
     rwtp_frame *result = rwtp_session_send_set_option(self, RWTP_OPTS_PUBKEY, args);
     if (!result) {
-        rwtp_frame_destroy(self_private_key_dup);
-        rwtp_frame_destroy(iv_dup);
+        rwtp_frame_destroy(self_private_key);
+        rwtp_frame_destroy(iv);
         return NULL;
     }
 
     // After message "sent", we update options
-    self->self_private_key = self_private_key_dup;
-    self->nonce_or_header = iv_dup;
+    self->self_private_key = self_private_key;
+    self->nonce_or_header = iv;
 
     return result;
 }
