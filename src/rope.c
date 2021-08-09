@@ -247,7 +247,6 @@ void rope_wire_start_handshake(rope_wire *self, bool rolling){
     if (self->type == ROPE_SOCK_P2P){
         rwtp_frame *prik = rwtp_frame_gen_private_key(), *iv = rwtp_frame_gen_public_key_mode_iv();
         rwtp_frame *set_pub_key_f = rwtp_session_send_set_pub_key(self->session, prik, iv);
-        rwtp_frame_destroy(prik); rwtp_frame_destroy(iv);
         zmsg_t *set_pub_key_msg = rwtp_frame_to_zmsg(set_pub_key_f);
         rwtp_frame_destroy(set_pub_key_f);
         zmsg_send(&set_pub_key_msg, self->sock);
@@ -259,7 +258,6 @@ void rope_wire_start_handshake(rope_wire *self, bool rolling){
     } else if (self->type == ROPE_SOCK_PUB){
         rwtp_frame *seck = rwtp_frame_gen_secret_key();
         rwtp_frame *set_sec_key_f = rwtp_session_send_set_sec_key(self->session, seck);
-        rwtp_frame_destroy(seck);
         zmsg_t *msg = rwtp_frame_to_zmsg(set_sec_key_f);
         rwtp_frame_destroy(set_sec_key_f);
         zmsg_send(&msg, self->sock);
@@ -330,7 +328,6 @@ rwtp_frame *rope_wire_recv_advanced(rope_wire *self, zsock_t *possible_sock){
                 if (!rope_wire_is_handshake_completed(self)){
                     rwtp_frame *prik = rwtp_frame_gen_private_key(), *iv = rwtp_frame_gen_public_key_mode_iv();
                     rwtp_frame *f = rwtp_session_send_set_pub_key(self->session, prik, iv);
-                    rwtp_frame_destroy(prik); rwtp_frame_destroy(iv);
                     __rope_wire_send_plain(self, f);
                     rwtp_frame_destroy(f);
                     self->state.handshake_stage++;
@@ -340,7 +337,6 @@ rwtp_frame *rope_wire_recv_advanced(rope_wire *self, zsock_t *possible_sock){
             } else if(result.opt == RWTP_OPTS_SECKEY){
                 rwtp_frame *seck = rwtp_frame_gen_secret_key();
                 rwtp_frame *f = rwtp_session_send_set_sec_key(self->session, seck);
-                rwtp_frame_destroy(seck);
                 __rope_wire_send_plain(self, f);
                 rwtp_frame_destroy(f);
             } else if(result.opt == RWTP_OPTS_TIME){
