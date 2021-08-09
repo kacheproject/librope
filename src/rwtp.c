@@ -326,25 +326,29 @@ static rwtp_session_read_result rwtp_session_read_data(rwtp_session *self, rwtp_
 }
 
 static void __rwtp_session_set_public_key(rwtp_session *self, rwtp_frame *public_key, rwtp_frame *iv){
-    if (self->remote_public_key){
-        rwtp_frame_destroy(self->remote_public_key);
-    }
-    if (self->nonce_or_header){
-        rwtp_frame_destroy(self->nonce_or_header);
-    }
+    rwtp_frame *original_pub_key = self->remote_public_key;
+    rwtp_frame *original_nonce = self->nonce_or_header;
     self->remote_public_key = public_key;
     self->nonce_or_header = iv;
+    if (original_pub_key){
+        rwtp_frame_destroy(original_pub_key);
+    }
+    if (original_nonce){
+        rwtp_frame_destroy(original_nonce);
+    }
 }
 
 static void __rwtp_session_set_secret_key(rwtp_session *self, rwtp_frame *secret_key, rwtp_frame *header){
-    if (self->secret_key){
-        rwtp_frame_destroy(self->secret_key);
-    }
-    if (self->nonce_or_header){
-        rwtp_frame_destroy(self->nonce_or_header);
-    }
+    rwtp_frame *original_secret_key = self->secret_key;
+    rwtp_frame *original_header = self->nonce_or_header;
     self->secret_key = secret_key;
     self->nonce_or_header = header;
+    if (original_secret_key){
+        rwtp_frame_destroy(original_secret_key);
+    }
+    if (original_header){
+        rwtp_frame_destroy(original_header);
+    }
 }
 
 static rwtp_session_read_result rwtp_session_read_setopt(rwtp_session *self, rwtp_frame *frames){
@@ -376,8 +380,8 @@ static rwtp_session_read_result rwtp_session_read_setopt(rwtp_session *self, rwt
                        crypto_secretstream_xchacha20poly1305_HEADERBYTES) {
             return (struct rwtp_session_read_result){-3};
         }
-        sec_keyf = rwtp_frame_clone(sec_keyf);
-        headerf = rwtp_frame_clone(headerf);
+        sec_keyf = rwtp_frame_copy(sec_keyf, 1);
+        headerf = rwtp_frame_copy(headerf, 1);
         __rwtp_session_set_secret_key(self, sec_keyf, headerf);
     } else if (opt_key == RWTP_OPTS_TIME) {
         rwtp_frame *timef;
