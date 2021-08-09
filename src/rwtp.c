@@ -91,7 +91,7 @@ void rwtp_frame_destroy(rwtp_frame *self) {
     rwtp_frame *next = self->frame_next;
     rwtp_frame_deinit(self);
     free(self);
-    return rwtp_frame_destroy_all(next);
+    return rwtp_frame_destroy(next);
 }
 
 void rwtp_frame_destroy_all(rwtp_frame *self) {
@@ -160,7 +160,7 @@ rwtp_frame *rwtp_frame_unpack_frames(const rwtp_frame *self) {
                 msgpack_unpacked_destroy(&unpacked);
                 msgpack_unpacker_destroy(&unpacker);
                 if (result_head){
-                    rwtp_frame_destroy_all(result_head);
+                    rwtp_frame_destroy(result_head);
                 }
                 return NULL;
             }
@@ -421,8 +421,19 @@ rwtp_session_read_result rwtp_session_read(rwtp_session *self, const rwtp_frame 
         result = (struct rwtp_session_read_result){-2};
     }
 
-    rwtp_frame_destroy_all(frames);
+    rwtp_frame_destroy(frames);
     return result;
+}
+
+rwtp_frame *rwtp_session_send_raw(rwtp_session *self, const rwtp_frame *frames){
+    rwtp_frame *blk = rwtp_frame_pack_frames(frames);
+    if (blk){
+        rwtp_frame *result = rwtp_session_encrypt_single(self, blk);
+        rwtp_frame_destroy(blk);
+        return result;
+    } else {
+        return NULL;
+    }
 }
 
 rwtp_frame *rwtp_session_send(rwtp_session *self, rwtp_frame *raw){
@@ -431,13 +442,16 @@ rwtp_frame *rwtp_session_send(rwtp_session *self, rwtp_frame *raw){
         .iovec_len = sizeof(uint8_t),
         .frame_next = raw,
     };
-    rwtp_frame *blk = rwtp_frame_pack_frames(&head);
-    if (!blk){
-        return NULL;
-    }
-    rwtp_frame *result = rwtp_session_encrypt_single(self, blk);
-    rwtp_frame_destroy(blk);
-    return result;
+    return rwtp_session_send_raw(self, &head);
+}
+
+rwtp_frame *rwtp_session_send_set_option(rwtp_session *self, uint8_t opt, const rwtp_frame *arguments){
+    rwtp_frame message[2] = {
+        {(uint8_t*)&RWTP_SETOPT, sizeof(uint8_t)},
+        {(uint8_t*)&opt, sizeof(uint8_t), .frame_next=arguments},
+    };
+    rwtp_frames_chain(message, 2);
+    return rwtp_session_send_raw(self, message);
 }
 
 rwtp_frame *rwtp_session_send_set_sec_key(rwtp_session *self, const rwtp_frame *secret_key){
@@ -463,16 +477,12 @@ rwtp_frame *rwtp_session_send_set_sec_key(rwtp_session *self, const rwtp_frame *
         return NULL;
     }
 
-    rwtp_frame message[4] = {
-        {(uint8_t*)&RWTP_SETOPT, sizeof(uint8_t)},
-        {(uint8_t*)&RWTP_OPTS_SECKEY, sizeof(uint8_t)},
+    rwtp_frame args[2] = {
         *dup_secret_key,
         *(self->nonce_or_header),
     };
-    rwtp_frames_chain(message, 4);
-    rwtp_frame *blk = rwtp_frame_pack_frames(message);
-    rwtp_frame *result = rwtp_session_encrypt_single(self, blk);
-    rwtp_frame_destroy(blk);
+    rwtp_frames_chain(args, 2);
+    rwtp_frame *result = rwtp_session_send_set_option(self, RWTP_OPTS_SECKEY, args);
 
     self->secret_key = dup_secret_key;
     return result;
@@ -497,12 +507,9 @@ rwtp_frame *rwtp_session_send_set_pub_key(rwtp_session *self,
         .iovec_data = pk,
         .iovec_len = crypto_box_PUBLICKEYBYTES,
     };
-    rwtp_frame message[4] = {{(uint8_t*)&RWTP_SETOPT, sizeof(uint8_t)},{(uint8_t*)&RWTP_OPTS_PUBKEY, sizeof(uint8_t)}, pk_frame, *iv};
-    rwtp_frames_chain(message, 4);
-    rwtp_frame *blk = rwtp_frame_pack_frames(message);
-    rwtp_frame *result;
-    result = rwtp_session_encrypt_single(self, blk);
-    rwtp_frame_destroy(blk);
+    rwtp_frame args[2] = {pk_frame, *iv};
+    rwtp_frames_chain(args, 2);
+    rwtp_frame *result = rwtp_session_send_set_option(self, RWTP_OPTS_PUBKEY, args);
     if (!result) {
         rwtp_frame_destroy(self_private_key_dup);
         rwtp_frame_destroy(iv_dup);
@@ -523,19 +530,8 @@ rwtp_frame *rwtp_session_send_set_time(const rwtp_session *self, int64_t time){
         .iovec_data = timestr,
         .iovec_len = strlen(timestr)+1,
     };
-    rwtp_frame message[3] = {
-        {(uint8_t*)&RWTP_SETOPT, sizeof(uint8_t)},
-        {(uint8_t*)&RWTP_OPTS_TIME, sizeof(uint8_t)},
-        timef,
-    };
-    rwtp_frames_chain(message, 3);
-    rwtp_frame *blk = rwtp_frame_pack_frames(message);
+    rwtp_frame *result = rwtp_session_send_set_option(self, RWTP_OPTS_TIME, &timef);
     free(timestr);
-    if (!blk){
-        return NULL;
-    }
-    rwtp_frame *result = rwtp_session_encrypt_single(self, blk);
-    rwtp_frame_destroy(blk);
     return result;
 }
 
@@ -545,13 +541,7 @@ rwtp_frame *rwtp_session_send_ask_option(rwtp_session *self, uint8_t option){
         {(uint8_t*)&option, sizeof(uint8_t)},
     };
     rwtp_frames_chain(message, 2);
-    rwtp_frame *blk = rwtp_frame_pack_frames(message);
-    if (!blk){
-        return NULL;
-    }
-    rwtp_frame *result = rwtp_session_encrypt_single(self, blk);
-    rwtp_frame_destroy(blk);
-    return result;
+    return rwtp_session_send_raw(self, message);
 }
 
 rwtp_frame *rwtp_frame_encrypt_single_seal(const rwtp_frame *self,
