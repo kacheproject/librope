@@ -70,6 +70,7 @@ typedef struct rope_router {
     zpoller_t *poller;
     rwtp_frame *network_key;
     zactor_t *poll_actor;
+    rope_cb_table callbacks;
 } rope_router;
 
 typedef struct rope_wire_state {
@@ -86,9 +87,17 @@ typedef struct rope_wire {
     zactor_t *monitor;
     rwtp_session *session;
     rope_wire_state state;
+    rope_cb_table callbacks;
 } rope_wire;
 
+/* Callback for event remote_id_changed. The event will be called every SETOPT ROPE_ID received */
 typedef void (*rope_wire_on_remote_id_changed)(void *udata, rope_wire *wire, zuuid_t *uuid);
+
+/* Callback for event handshake_completed. The event will be called every handshake completed. */
+typedef void (*rope_wire_on_handshake_completed)(void *udata, rope_wire *wire);
+
+/* Callback for event remote_id_requested. The event will be called when remote ask for identity. You should provide one though uuid. */
+typedef void (*rope_wire_on_remote_id_requested)(void *udata, rope_wire *wire, zuuid_t **uuid);
 
 typedef struct rope_pin {
     rope_router *router;
@@ -97,6 +106,7 @@ typedef struct rope_pin {
     khash_t(ptr) *sockets; // zsock_t * or zactor_t * to rope_wire *
     rope_wire *proxy;
     rope_wire *selected_wire;
+    rope_cb_table callbacks;
 } rope_pin;
 
 rope_router *rope_router_init(rope_router *self, zuuid_t *self_id, rwtp_frame *network_key);

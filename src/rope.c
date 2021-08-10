@@ -123,11 +123,13 @@ rope_router *rope_router_init(rope_router *self, zuuid_t *self_id,
         .network_key = network_key,
         .pins = pins,
         .poller = poller,
+        .callbacks = rope_cb_table_init(),
     };
     return self;
 }
 
 void rope_router_deinit(rope_router *self) {
+    rope_cb_table_deinit(&self->callbacks);
     rope_pin *pin;
     kh_foreach_value(self->pins, pin, rope_pin_destroy(pin));
     zpoller_destroy(&self->poller);
@@ -241,6 +243,7 @@ rope_wire *rope_wire_init(rope_wire *self, char *address, rope_sock_type type,
             .last_active_time = 0,
             .latency = -1,
         },
+        .callbacks = rope_cb_table_init(),
     };
     return self;
 
@@ -268,6 +271,7 @@ rope_wire *rope_wire_new(zsock_t *sock, char *address, rope_sock_type type,
 }
 
 void rope_wire_deinit(rope_wire *self) {
+    rope_cb_table_deinit(&self->callbacks);
     free(self->address);
     zactor_destroy(&self->monitor);
     zsock_destroy(&self->sock);
@@ -351,6 +355,14 @@ bool rope_wire_is_active(rope_wire *self){
     return time(NULL) > (self->state.last_active_time + self->state.active_timeout);
 }
 
+static void rope_wire_handshake_stage_forward(rope_wire *self){
+    bool completed_before_increment = rope_wire_is_handshake_completed(self);
+    self->state.handshake_stage++;
+    if (!completed_before_increment && rope_wire_is_handshake_completed(self)){
+        rope_cb_table_call(&self->callbacks, "handshake_completed", rope_wire_on_handshake_completed, self);
+    }
+}
+
 void rope_wire_start_handshake(rope_wire *self, bool rolling){
     if (rolling) self->state.handshake_stage = 0;
     if (self->state.handshake_stage != 0) return;
@@ -364,14 +376,14 @@ void rope_wire_start_handshake(rope_wire *self, bool rolling){
         zmsg_t *ask_pub_key_msg = rwtp_frame_to_zmsg(ask_pub_key_f);
         rwtp_frame_destroy(ask_pub_key_f);
         zmsg_send(&ask_pub_key_msg, self->sock);
-        self->state.handshake_stage += 1;
+        rope_wire_handshake_stage_forward(self);
     } else if (self->type == ROPE_SOCK_PUB){
         rwtp_frame *seck = rwtp_frame_gen_secret_key();
         rwtp_frame *set_sec_key_f = rwtp_session_send_set_sec_key(self->session, seck);
         zmsg_t *msg = rwtp_frame_to_zmsg(set_sec_key_f);
         rwtp_frame_destroy(set_sec_key_f);
         zmsg_send(&msg, self->sock);
-        self->state.handshake_stage += 1;
+        rope_wire_handshake_stage_forward(self);
     }
 }
 
@@ -429,12 +441,20 @@ rwtp_frame *rope_wire_recv_advanced(rope_wire *self, zsock_t *possible_sock){
         } else if (result.status_code == RWTP_SETOPT){
             if (result.opt == RWTP_OPTS_PUBKEY){
                 if(!rope_wire_is_handshake_completed(self)){
-                    self->state.handshake_stage++;
+                    rope_wire_handshake_stage_forward(self);
                 } else {
                     rope_wire_start_handshake(self, true);
                 }
             } else if(result.opt == RWTP_OPTS_SECKEY){
                 if (!rope_wire_is_handshake_completed(self)) self->state.handshake_stage++;
+            } else if (result.opt == RWTP_EOPTS_ROPE_ID){
+                rwtp_frame *id = result.user_message;
+                if (id->iovec_len == ZUUID_LEN){
+                    zuuid_t *zuuid_object = zuuid_new_from(id->iovec_data);
+                    if (zuuid_object){
+                        rope_cb_table_call(&self->callbacks, "remote_id_changed", rope_wire_on_remote_id_changed, self, zuuid_object);
+                    }
+                }
             }
         } else if (result.status_code == RWTP_ASKOPT){
             if (result.opt == RWTP_OPTS_PUBKEY){
@@ -456,6 +476,20 @@ rwtp_frame *rope_wire_recv_advanced(rope_wire *self, zsock_t *possible_sock){
                 rwtp_frame *f = rwtp_session_send_set_time(self->session, time(NULL));
                 __rope_wire_send_plain(self, f);
                 rwtp_frame_destroy(f);
+            } else if (result.opt == RWTP_EOPTS_ROPE_ID){
+                zuuid_t *uuid = NULL;
+                rope_cb_table_call(&self->callbacks, "remote_id_requested", rope_wire_on_remote_id_requested, self, &uuid);
+                if (uuid){
+                    rwtp_frame idf = {
+                        .iovec_data = (void *)zuuid_data(uuid),
+                        .iovec_len = zuuid_size(uuid),
+                        .frame_next = NULL,
+                    };
+                    rwtp_frame *f = rwtp_session_send_set_option(self->session, RWTP_EOPTS_ROPE_ID, &idf);
+                    __rope_wire_send_plain(self, f);
+                    rwtp_frame_destroy(f);
+                    zuuid_destroy(&uuid);
+                }
             }
         }
         return NULL;
@@ -554,6 +588,7 @@ rope_pin *rope_pin_init(rope_pin *self, rope_router *router,
         .proxy = proxy,
         .remote_id = NULL,
         .selected_wire = NULL,
+        .callbacks = rope_cb_table_init(),
     };
     return self;
 
@@ -570,6 +605,7 @@ errcleanup:
 }
 
 void rope_pin_deinit(rope_pin *self) {
+    rope_cb_table_deinit(&self->callbacks);
     {
         rope_wire *wire;
         kh_foreach_value(self->wires, wire, rope_wire_zpoller_rm(wire, self->router->poller);rope_wire_destroy(wire));
