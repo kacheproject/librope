@@ -5,6 +5,59 @@
 KHASH_MAP_INIT_STR(str, khptr_t);
 KHASH_MAP_INIT_PTR(ptr, khptr_t);
 
+static const int RWTP_EOPTS_ROPE_ID = 64;
+
+typedef void (*rope_cb_basefn)(void *udata);
+
+typedef struct rope_cb_table {
+    khash_t(str) *vft;
+} rope_cb_table;
+
+typedef struct rope_cb {
+    rope_cb_basefn callback;
+    void *udata;
+    struct rope_cb *next;
+} rope_cb;
+
+/* Initialise a rope_cb_table. */
+rope_cb_table rope_cb_table_init();
+
+/* Deinitialise a rope_cb_table. */
+void rope_cb_table_deinit(rope_cb_table *self);
+
+/* Add a callback into rope_cb_table. */
+int rope_cb_table_set_callback(rope_cb_table *self, const char *name, rope_cb_basefn callback, void *udata);
+
+/* A shortcut helps you cast `callback` as rope_cb_basefn.
+The rope_cb_basefn used rather than void* because void* could not be converted to function pointer. */
+#define rope_cb_table_set_callback_q(self, name, callback, udata) rope_cb_table_set_callback(self, name, (rope_cb_basefn)callback, udata)
+
+/* Get the rope_cb objects. */
+const rope_cb *rope_cb_table_get_callbacks(rope_cb_table *self, const char *name);
+
+/* Shortcut to invoke single rope_cb *. `self` is the pointer, `cb_type` is callback function type.
+Example:
+    rope_cb *any;
+    typedef void (*spam_callback_type)(void* udata, char *arg0, char *arg1);
+    rope_cb_invoke(any, spam_callback_type, "HELLO", "WORLD");
+The first argument will be field 'udata' in rope_cb.
+*/
+#define rope_cb_invoke(self, cb_type, ...) (((cb_type)self->callback)(self->udata, __VA_ARGS__))
+
+/* Call callbacks in rope_cb_table. `self` is `rope_cb_table *`, name is `const char *name`, cb_type is callback function type.
+Example:
+    typedef void (*spam_callback_type)(void* udata, char *arg0, char *arg1);
+    rope_cb_table *my_cb_table;
+    rope_cb_table_call(my_cb_table, "rope.test_callback", spam_callback_type, "HELLO", "TANKMAN");
+*/
+#define rope_cb_table_call(self, name, cb_type, ...) {\
+    rope_cb *__curr = (rope_cb *)rope_cb_table_get_callbacks(self, name);\
+    while(__curr){\
+        rope_cb_invoke(__curr, cb_type, __VA_ARGS__);\
+        __curr = __curr->next;\
+    }\
+}
+
 typedef enum rope_sock_type {
     ROPE_SOCK_P2P,
     ROPE_SOCK_PUB,
@@ -12,23 +65,12 @@ typedef enum rope_sock_type {
 } rope_sock_type;
 
 typedef struct rope_router {
-    rwtp_frame *self_id;
+    zuuid_t *self_id;
     khash_t(ptr) *pins; // zsock_t * or zactor_t * to rope_pin *
     zpoller_t *poller;
     rwtp_frame *network_key;
     zactor_t *poll_actor;
 } rope_router;
-
-rope_router *rope_router_init(rope_router *self, rwtp_frame *self_id, rwtp_frame *network_key);
-void rope_router_deinit(rope_router *self);
-rope_router *rope_router_new(rwtp_frame *self_id, rwtp_frame *network_key);
-void rope_router_destroy(rope_router *self);
-
-int rope_router_poll(rope_router *self, int timeout);
-int rope_router_start_poll_thread(rope_router *self);
-void rope_router_stop_poll_thread(rope_router *self);
-
-int rope_router_connect(rope_router *self);
 
 typedef struct rope_wire_state {
     uint64_t last_active_time;
@@ -45,6 +87,28 @@ typedef struct rope_wire {
     rwtp_session *session;
     rope_wire_state state;
 } rope_wire;
+
+typedef void (*rope_wire_on_remote_id_changed)(void *udata, rope_wire *wire, zuuid_t *uuid);
+
+typedef struct rope_pin {
+    rope_router *router;
+    zuuid_t *remote_id;
+    khash_t(str) *wires; // char * to rope_wire *
+    khash_t(ptr) *sockets; // zsock_t * or zactor_t * to rope_wire *
+    rope_wire *proxy;
+    rope_wire *selected_wire;
+} rope_pin;
+
+rope_router *rope_router_init(rope_router *self, zuuid_t *self_id, rwtp_frame *network_key);
+void rope_router_deinit(rope_router *self);
+rope_router *rope_router_new(zuuid_t *self_id, rwtp_frame *network_key);
+void rope_router_destroy(rope_router *self);
+
+int rope_router_poll(rope_router *self, int timeout);
+int rope_router_start_poll_thread(rope_router *self);
+void rope_router_stop_poll_thread(rope_router *self);
+
+int rope_router_connect(rope_router *self);
 
 /*! @function
     @abstract Setup structure for rope_wire. Callee owns arguments.
@@ -90,21 +154,12 @@ int rope_wire_zpoller_rm(rope_wire *self, zpoller_t *poller);
 int rope_wire_input(rope_wire *self, zsock_t *input);
 int rope_wire_output(rope_wire *self, zsock_t *output);
 
-typedef struct rope_pin {
-    rope_router *router;
-    rwtp_frame *remote_id;
-    khash_t(str) *wires; // char * to rope_wire *
-    khash_t(ptr) *sockets; // zsock_t * or zactor_t * to rope_wire *
-    rope_wire *proxy; 
-    rope_wire *selected_wire;
-} rope_pin;
-
 rope_pin *rope_pin_init(rope_pin *self, rope_router *router, char *proxy_binding_addr, rope_sock_type type);
 void rope_pin_deinit(rope_pin *self);
 rope_pin *rope_pin_new(rope_router *router, char *proxy_binding_addr, rope_sock_type type);
 void rope_pin_destroy(rope_pin *self);
 
-void rope_pin_merge(rope_pin *self, rope_pin *src);
+int rope_pin_transfer_wire(rope_pin *self, rope_wire *wire, rwtp_frame *dst_id);
 
 /* Select a wire. Return NULL if no one fits. */
 rope_wire *rope_pin_select_wire(rope_pin *self);
@@ -112,8 +167,8 @@ rope_wire *rope_pin_select_wire(rope_pin *self);
 /* Handle input from sock. Return -EPERM if failed, -EAGAIN if could not could not proxy message. */
 int rope_pin_handle(rope_pin *self, zsock_t *sock);
 
-/* Add a rope_wire. Callee owns arguments. */
-int rope_pin_add_wire(rope_pin *self, rope_wire *wires);
+/* Add a rope_wire. Return the endpoint of the wire. Callee owns arguments. Callee owns the result.*/
+const char * rope_pin_add_wire(rope_pin *self, rope_wire *wires);
 
 /* Extension to rwtp library */
 

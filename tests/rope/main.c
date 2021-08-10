@@ -6,25 +6,23 @@ TAU_MAIN()
 
 TEST(rope_router, init_and_deinit){
     zuuid_t *uuid = zuuid_new();
-    rwtp_frame *self_id = rwtp_frame_from_zuuid(&uuid);
 
     rope_router router0;
-    rope_router_init(&router0, rwtp_frame_clone(self_id), rwtp_frame_gen_network_key());
-    REQUIRE_BUF_EQ(router0.self_id->iovec_data, self_id->iovec_data, self_id->iovec_len);
+    rope_router_init(&router0, zuuid_dup(uuid), rwtp_frame_gen_network_key());
+    REQUIRE_BUF_EQ((void *)zuuid_data(router0.self_id), (void *)zuuid_data(uuid), zuuid_size(uuid));
     rope_router_deinit(&router0);
 
-    rope_router *router1 = rope_router_new(rwtp_frame_clone(self_id), rwtp_frame_gen_network_key());
-    REQUIRE_BUF_EQ(router1->self_id->iovec_data, self_id->iovec_data, self_id->iovec_len);
+    rope_router *router1 = rope_router_new(zuuid_dup(uuid), rwtp_frame_gen_network_key());
+    REQUIRE_BUF_EQ((void *)zuuid_data(router1->self_id), (void *)zuuid_data(uuid), zuuid_size(uuid));
     rope_router_destroy(router1);
 
-    rwtp_frame_destroy(self_id);
+    zuuid_destroy(&uuid);
 }
 
 TEST(rope_router, poll_thread_start_and_stop){
     rope_router router0;
     zuuid_t *uuid = zuuid_new();
-    rwtp_frame *self_id = rwtp_frame_from_zuuid(&uuid);
-    rope_router_init(&router0, self_id, rwtp_frame_gen_network_key());
+    rope_router_init(&router0, uuid, rwtp_frame_gen_network_key());
     rope_router_start_poll_thread(&router0);
     rope_router_stop_poll_thread(&router0);
     rope_router_deinit(&router0);
@@ -59,7 +57,35 @@ TEST(rope_wire, p2p_wire){
         }
     }
 
+    rwtp_frame hellof = {.iovec_len=7, .iovec_data="Hello!", .frame_next=NULL};
+    rope_wire_send(alice, &hellof);
+    rwtp_frame *recevied = rope_wire_recv(bob);
+    REQUIRE_STREQ((char *)recevied->iovec_data, (char *)hellof.iovec_data);
+    rwtp_frame_destroy(recevied);
+
     zpoller_destroy(&poller);
     rope_wire_destroy(alice);
     rope_wire_destroy(bob);
 }
+
+typedef void (*increment_callback_fn)(void *udata, char *arg0);
+
+void increment_callback(void *udata, char *arg0){
+    REQUIRE_STREQ(arg0, "Hello!");
+    int *counter = udata;
+    (*counter)++;
+}
+
+TEST(rope_cb_table, can_correctly_callback_funtions){
+    int called_times = 0;
+    rope_cb_table table = rope_cb_table_init();
+    
+    rope_cb_table_set_callback_q(&table, "test0", &increment_callback, &called_times);
+    rope_cb_table_set_callback_q(&table, "test0", &increment_callback, &called_times);
+    rope_cb_table_call(&table, "test0", increment_callback_fn, "Hello!");
+    REQUIRE_EQ(called_times, 2);
+
+    rope_cb_table_deinit(&table);
+}
+
+/* TODO: test if pin proxy working */

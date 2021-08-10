@@ -12,6 +12,64 @@
 
 #define New(type) malloc(sizeof(type))
 
+rope_cb_table rope_cb_table_init(){
+    return (struct rope_cb_table){
+        .vft = kh_init(str),
+    };
+}
+
+void rope_cb_table_deinit(rope_cb_table *self){
+    {
+        rope_cb *cb = NULL;
+        kh_foreach_value(self->vft, cb, {
+            rope_cb *curr = cb;
+            while (curr){
+                rope_cb *next = curr->next;
+                free(curr);
+                curr = next;
+            }
+        });
+    }
+    kh_destroy(str, self->vft);
+}
+
+int rope_cb_table_set_callback(rope_cb_table *self, const char *name, rope_cb_basefn callback, void *udata){
+    rope_cb *cb_obj = New(rope_cb);
+    if (!cb_obj) return -1;
+    *cb_obj = (struct rope_cb){
+        .callback = callback,
+        .udata = udata,
+        .next = NULL,
+    };
+    rope_cb *curr = (rope_cb *)rope_cb_table_get_callbacks(self, name);
+    if (curr){
+        while(curr->next){
+            curr = curr->next;
+        }
+        curr->next = cb_obj;
+    } else {
+        int ret = -1;
+        khiter_t k = kh_put(str, self->vft, name, &ret);
+        if (ret == 1){ /* If the table never used before, try again. */
+            k = kh_put(str, self->vft, name, &ret);
+        } else if (ret){
+            free(cb_obj);
+            return -1;
+        }
+        kh_val(self->vft, k) = cb_obj;
+    }
+    return 0;
+}
+
+const rope_cb *rope_cb_table_get_callbacks(rope_cb_table *self, const char *name){
+    khiter_t k = kh_get(str, self->vft, name);
+    if (k == kh_end(self->vft)){
+        return NULL;
+    } else {
+        return kh_val(self->vft, k);
+    }
+}
+
 static char *endpoint_replace_port(const char *endpoint, int port){
     size_t slen = strlen(endpoint);
     size_t port_start_index = 0;
@@ -49,7 +107,7 @@ static char *endpoint_replace_port(const char *endpoint, int port){
 
 /* Router */
 
-rope_router *rope_router_init(rope_router *self, rwtp_frame *self_id,
+rope_router *rope_router_init(rope_router *self, zuuid_t *self_id,
                               rwtp_frame *network_key) {
     khash_t(ptr) *pins = kh_init(ptr);
     if (!pins){
@@ -75,10 +133,10 @@ void rope_router_deinit(rope_router *self) {
     zpoller_destroy(&self->poller);
     kh_destroy(ptr, self->pins);
     rwtp_frame_destroy(self->network_key);
-    rwtp_frame_destroy(self->self_id);
+    zuuid_destroy(&self->self_id);
 }
 
-rope_router *rope_router_new(rwtp_frame *self_id, rwtp_frame *network_key) {
+rope_router *rope_router_new(zuuid_t *self_id, rwtp_frame *network_key) {
     rope_router *object = New(rope_router);
     if (!object) {
         return NULL;
@@ -486,6 +544,7 @@ rope_pin *rope_pin_init(rope_pin *self, rope_router *router,
         proxy_type = ROPE_SOCK_PUB;
     }
     proxy = rope_wire_new_bind(proxy_binding_addr, proxy_type, rwtp_frame_clone(router->network_key));
+    rope_wire_zpoller_add(proxy, router->poller);
     NonNullOrGoToErrCleanup(proxy);
 
     *self = (struct rope_pin){
@@ -513,9 +572,10 @@ errcleanup:
 void rope_pin_deinit(rope_pin *self) {
     {
         rope_wire *wire;
-        kh_foreach_value(self->wires, wire, rope_wire_destroy(wire));
+        kh_foreach_value(self->wires, wire, rope_wire_zpoller_rm(wire, self->router->poller);rope_wire_destroy(wire));
     }
     kh_destroy(str, self->wires);
+    rope_wire_zpoller_rm(self->proxy, self->router->poller);
     rope_wire_destroy(self->proxy);
     *self = (struct rope_pin){};
 }
@@ -590,7 +650,7 @@ int rope_pin_handle(rope_pin *self, zsock_t *sock){
     return 0;
 }
 
-int rope_pin_add_wire(rope_pin *self, rope_wire *wire){
+const char * rope_pin_add_wire(rope_pin *self, rope_wire *wire){
     int ret;
     khiter_t k;
     k = kh_put(str, self->wires, wire->address, &ret);
@@ -603,7 +663,7 @@ int rope_pin_add_wire(rope_pin *self, rope_wire *wire){
     NonNullOrGoToErrCleanup(ret != -1);
     kh_val(self->sockets, k) = wire;
     NonNullOrGoToErrCleanup(!rope_wire_zpoller_add(wire, self->router->poller));
-    return 0;
+    return wire->address;
 
     errcleanup:
     if ((k = kh_get(str, self->wires, wire->address)) != kh_end(self->wires)) kh_del(str, self->wires, k);
@@ -611,5 +671,5 @@ int rope_pin_add_wire(rope_pin *self, rope_wire *wire){
     if ((k = kh_get(ptr, self->sockets, wire->monitor)) != kh_end(self->sockets)) kh_del(ptr, self->sockets, k);
     rope_wire_zpoller_rm(wire, self->router->poller);
     rope_wire_destroy(wire);
-    return -EPERM;
+    return NULL;
 }
