@@ -80,6 +80,11 @@ typedef struct rope_wire_state {
     int8_t handshake_stage;
 } rope_wire_state;
 
+
+static const char *ROPE_WIRE_EV_REMOTE_ID_CHANGED = "remote_id_changed";
+static const char *ROPE_WIRE_EV_HANDSHAKE_COMPLETED = "handshake_completed";
+static const char *ROPE_WIRE_EV_REMOTE_ID_REQUESTED = "remote_id_requested";
+
 typedef struct rope_wire {
     char *address;
     rope_sock_type type;
@@ -90,13 +95,13 @@ typedef struct rope_wire {
     rope_cb_table callbacks;
 } rope_wire;
 
-/* Callback for event remote_id_changed. The event will be called every SETOPT ROPE_ID received */
+/* Callback for event remote_id_changed. The event will be called every SETOPT ROPE_ID received. No guarantee to the existence of uuid after function return.  */
 typedef void (*rope_wire_on_remote_id_changed)(void *udata, rope_wire *wire, zuuid_t *uuid);
 
 /* Callback for event handshake_completed. The event will be called every handshake completed. */
 typedef void (*rope_wire_on_handshake_completed)(void *udata, rope_wire *wire);
 
-/* Callback for event remote_id_requested. The event will be called when remote ask for identity. You should provide one though uuid. */
+/* Callback for event remote_id_requested. The event will be called when remote ask for identity. You should provide one though `uuid`. */
 typedef void (*rope_wire_on_remote_id_requested)(void *udata, rope_wire *wire, zuuid_t **uuid);
 
 typedef struct rope_pin {
@@ -163,6 +168,8 @@ int rope_wire_zpoller_rm(rope_wire *self, zpoller_t *poller);
 
 int rope_wire_input(rope_wire *self, zsock_t *input);
 int rope_wire_output(rope_wire *self, zsock_t *output);
+
+int rope_wire_send_set_rope_id(rope_wire *self, zuuid_t *uuid);
 
 rope_pin *rope_pin_init(rope_pin *self, rope_router *router, char *proxy_binding_addr, rope_sock_type type);
 void rope_pin_deinit(rope_pin *self);

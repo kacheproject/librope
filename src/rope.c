@@ -12,6 +12,30 @@
 
 #define New(type) malloc(sizeof(type))
 
+static void rope_cb_table_print(rope_cb_table *self) {
+    #ifdef Debug
+    printf("{");
+    const char *k = NULL;
+    rope_cb *cb = NULL;
+    kh_foreach(self->vft, k, cb, {
+        printf("\"%s\":[", k);
+        while (cb) {
+            printf("{callback=%p, udata=%p},", cb->callback, cb->udata);
+            cb = cb->next;
+        }
+        printf("],");
+    }) printf("}\n");
+    #endif
+}
+
+#ifdef Debug
+#define rope_debug(scope, s, ...) zsys_debug(scope ": " s, __VA_ARGS__)
+#define rope_error(scope, s, ...) zsys_error(scope ":" s, __VA_ARGS__)
+#else
+#define rope_debug(scope, s, ...) {}
+#define rope_error(scope, s, ...) {}
+#endif
+
 rope_cb_table rope_cb_table_init(){
     return (struct rope_cb_table){
         .vft = kh_init(str),
@@ -48,16 +72,20 @@ int rope_cb_table_set_callback(rope_cb_table *self, const char *name, rope_cb_ba
         }
         curr->next = cb_obj;
     } else {
-        int ret = -1;
-        khiter_t k = kh_put(str, self->vft, name, &ret);
-        if (ret == 1){ /* If the table never used before, try again. */
+        int ret = 1, tries = 3;
+        khiter_t k = kh_begin(self->vft);
+        while (ret == 1 && tries > 0){
             k = kh_put(str, self->vft, name, &ret);
-        } else if (ret){
+            tries--;
+        }
+        if (ret){
             free(cb_obj);
             return -1;
         }
         kh_val(self->vft, k) = cb_obj;
     }
+    rope_debug("rope_cb_table_set_callback", "%s", "");
+    rope_cb_table_print(self);
     return 0;
 }
 
@@ -219,6 +247,25 @@ static int rope_wire_type_to_zmq_type(rope_sock_type type) {
 
 /* Wire */
 
+static void __rope_wire_on_handshake_completed_ask_id(rope_wire *self, rope_wire *_);
+
+static int __rope_wire_send_plain(rope_wire *self, const rwtp_frame *f) {
+    rwtp_frame *curr = (rwtp_frame *)f;
+    while (curr) {
+        zframe_t *zf = rwtp_frame_to_zframe(curr);
+        if (zf) {
+            if(zframe_send(&zf, self->sock, 0)){
+                zframe_destroy(&zf);
+                return -1;
+            }
+        } else {
+            return -1;
+        }
+        curr = curr->frame_next;
+    }
+    return 0;
+}
+
 rope_wire *rope_wire_init(rope_wire *self, char *address, rope_sock_type type,
                           zsock_t *sock, zactor_t *monitor,
                           rwtp_session *session) {
@@ -245,6 +292,11 @@ rope_wire *rope_wire_init(rope_wire *self, char *address, rope_sock_type type,
         },
         .callbacks = rope_cb_table_init(),
     };
+    rope_cb_table_set_callback_q(
+        &self->callbacks,
+        ROPE_WIRE_EV_HANDSHAKE_COMPLETED,
+        (rope_wire_on_handshake_completed)&__rope_wire_on_handshake_completed_ask_id,
+        self);
     return self;
 
 errcleanup:
@@ -289,7 +341,7 @@ rope_wire *rope_wire_new_connect(char *endpoint, rope_sock_type type, rwtp_frame
     NonNullOrGoToErrCleanup(network_key);
     sock = zsock_new(rope_wire_type_to_zmq_type(type));
     if (zsock_connect(sock, "%s", endpoint) < 0){
-        zsys_error("rope_wire_new_connect: connect failed \"%s\"", endpoint);
+        rope_error("rope_wire_new_connect", "connect failed \"%s\"", endpoint);
         goto errcleanup;
     }
     session = rwtp_session_new(network_key);
@@ -359,7 +411,7 @@ static void rope_wire_handshake_stage_forward(rope_wire *self){
     bool completed_before_increment = rope_wire_is_handshake_completed(self);
     self->state.handshake_stage++;
     if (!completed_before_increment && rope_wire_is_handshake_completed(self)){
-        rope_cb_table_call(&self->callbacks, "handshake_completed", rope_wire_on_handshake_completed, self);
+        rope_cb_table_call(&self->callbacks, ROPE_WIRE_EV_HANDSHAKE_COMPLETED, rope_wire_on_handshake_completed, self);
     }
 }
 
@@ -369,20 +421,17 @@ void rope_wire_start_handshake(rope_wire *self, bool rolling){
     if (self->type == ROPE_SOCK_P2P){
         rwtp_frame *prik = rwtp_frame_gen_private_key(), *iv = rwtp_frame_gen_public_key_mode_iv();
         rwtp_frame *set_pub_key_f = rwtp_session_send_set_pub_key(self->session, prik, iv);
-        zmsg_t *set_pub_key_msg = rwtp_frame_to_zmsg(set_pub_key_f);
+        __rope_wire_send_plain(self, set_pub_key_f);
         rwtp_frame_destroy(set_pub_key_f);
-        zmsg_send(&set_pub_key_msg, self->sock);
         rwtp_frame *ask_pub_key_f = rwtp_session_send_ask_option(self->session, RWTP_OPTS_PUBKEY);
-        zmsg_t *ask_pub_key_msg = rwtp_frame_to_zmsg(ask_pub_key_f);
+        __rope_wire_send_plain(self, ask_pub_key_f);
         rwtp_frame_destroy(ask_pub_key_f);
-        zmsg_send(&ask_pub_key_msg, self->sock);
         rope_wire_handshake_stage_forward(self);
     } else if (self->type == ROPE_SOCK_PUB){
         rwtp_frame *seck = rwtp_frame_gen_secret_key();
         rwtp_frame *set_sec_key_f = rwtp_session_send_set_sec_key(self->session, seck);
-        zmsg_t *msg = rwtp_frame_to_zmsg(set_sec_key_f);
+        __rope_wire_send_plain(self, set_sec_key_f);
         rwtp_frame_destroy(set_sec_key_f);
-        zmsg_send(&msg, self->sock);
         rope_wire_handshake_stage_forward(self);
     }
 }
@@ -399,21 +448,12 @@ bool rope_wire_is_handshake_completed(rope_wire *self){
     }
 }
 
-static int __rope_wire_send_plain(rope_wire *self, const rwtp_frame *f) {
-    rwtp_frame *curr = (rwtp_frame *)f;
-    while (curr) {
-        zframe_t *zf = rwtp_frame_to_zframe(curr);
-        if (zf) {
-            if(zframe_send(&zf, self->sock, 0)){
-                zframe_destroy(&zf);
-                return -1;
-            }
-        } else {
-            return -1;
-        }
-        curr = curr->frame_next;
+static void __rope_wire_on_handshake_completed_ask_id(rope_wire *self, rope_wire *_){
+    rwtp_frame *f = rwtp_session_send_ask_option(self->session, RWTP_EOPTS_ROPE_ID);
+    if (f){
+        __rope_wire_send_plain(self, f);
+        rwtp_frame_destroy(f);
     }
-    return 0;
 }
 
 int rope_wire_send(rope_wire *self, const rwtp_frame *msg){
@@ -430,11 +470,13 @@ int rope_wire_send(rope_wire *self, const rwtp_frame *msg){
 }
 
 rwtp_frame *rope_wire_recv_advanced(rope_wire *self, zsock_t *possible_sock){
+    rope_debug("rope_wire_read_advanced", "working on %p", self);
     if (!possible_sock || possible_sock == self->sock){
         zframe_t *zf = zframe_recv(self->sock);
         rwtp_frame *st = rwtp_frame_from_zframe(zf);
         zframe_destroy(&zf);
         rwtp_session_read_result result = rwtp_session_read(self->session, st);
+        rope_debug("rope_wire_recv_advanced", "read result: status_code=%d, opt=%d, user_message=%p", result.status_code, result.opt, result.user_message);
         rwtp_frame_destroy(st);
         if (result.status_code == RWTP_DATA){
             return result.user_message;
@@ -446,15 +488,19 @@ rwtp_frame *rope_wire_recv_advanced(rope_wire *self, zsock_t *possible_sock){
                     rope_wire_start_handshake(self, true);
                 }
             } else if(result.opt == RWTP_OPTS_SECKEY){
-                if (!rope_wire_is_handshake_completed(self)) self->state.handshake_stage++;
+                if (!rope_wire_is_handshake_completed(self)) rope_wire_handshake_stage_forward(self);
             } else if (result.opt == RWTP_EOPTS_ROPE_ID){
                 rwtp_frame *id = result.user_message;
                 if (id->iovec_len == ZUUID_LEN){
                     zuuid_t *zuuid_object = zuuid_new_from(id->iovec_data);
                     if (zuuid_object){
-                        rope_cb_table_call(&self->callbacks, "remote_id_changed", rope_wire_on_remote_id_changed, self, zuuid_object);
+                        rope_cb_table_call(&self->callbacks, ROPE_WIRE_EV_REMOTE_ID_CHANGED, rope_wire_on_remote_id_changed, self, zuuid_object);
+                        zuuid_destroy(&zuuid_object);
                     }
                 }
+            }
+            if (result.user_message){
+                rwtp_frame_destroy(result.user_message);
             }
         } else if (result.status_code == RWTP_ASKOPT){
             if (result.opt == RWTP_OPTS_PUBKEY){
@@ -463,7 +509,7 @@ rwtp_frame *rope_wire_recv_advanced(rope_wire *self, zsock_t *possible_sock){
                     rwtp_frame *f = rwtp_session_send_set_pub_key(self->session, prik, iv);
                     __rope_wire_send_plain(self, f);
                     rwtp_frame_destroy(f);
-                    self->state.handshake_stage++;
+                    rope_wire_handshake_stage_forward(self);
                 } else {
                     rope_wire_start_handshake(self, true);
                 }
@@ -478,18 +524,21 @@ rwtp_frame *rope_wire_recv_advanced(rope_wire *self, zsock_t *possible_sock){
                 rwtp_frame_destroy(f);
             } else if (result.opt == RWTP_EOPTS_ROPE_ID){
                 zuuid_t *uuid = NULL;
-                rope_cb_table_call(&self->callbacks, "remote_id_requested", rope_wire_on_remote_id_requested, self, &uuid);
+                rope_cb_table_call(&self->callbacks, ROPE_WIRE_EV_REMOTE_ID_REQUESTED, rope_wire_on_remote_id_requested, self, &uuid);
                 if (uuid){
-                    rwtp_frame idf = {
-                        .iovec_data = (void *)zuuid_data(uuid),
-                        .iovec_len = zuuid_size(uuid),
-                        .frame_next = NULL,
-                    };
-                    rwtp_frame *f = rwtp_session_send_set_option(self->session, RWTP_EOPTS_ROPE_ID, &idf);
-                    __rope_wire_send_plain(self, f);
-                    rwtp_frame_destroy(f);
+                    int ret = 0;
+                    if ((ret = rope_wire_send_set_rope_id(self, uuid))){
+                        rope_error("rope_wire_received_advanced", "send rope id failed: %d", ret);
+                    }
                     zuuid_destroy(&uuid);
                 }
+            }
+            if (result.user_message){
+                rwtp_frame_destroy(result.user_message);
+            }
+        } else {
+            if (result.user_message){
+                rwtp_frame_destroy(result.user_message);
             }
         }
         return NULL;
@@ -558,6 +607,22 @@ int rope_wire_output(rope_wire *self, zsock_t *output){
     } else {
         return -EAGAIN;
     }
+}
+
+int rope_wire_send_set_rope_id(rope_wire *self, zuuid_t *uuid) {
+    int ret_code = 0;
+    rwtp_frame idf = {
+        .iovec_data = (void *)zuuid_data(uuid),
+        .iovec_len = zuuid_size(uuid),
+        .frame_next = NULL,
+    };
+    rwtp_frame *f =
+        rwtp_session_send_set_option(self->session, RWTP_EOPTS_ROPE_ID, &idf);
+    if(__rope_wire_send_plain(self, f)){
+        ret_code = -1;
+    }
+    rwtp_frame_destroy(f);
+    return ret_code;
 }
 
 /* Pin */

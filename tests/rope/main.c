@@ -34,7 +34,16 @@ TEST(rope_wire, init_and_deinit){
     rope_wire_destroy(wire);
 }
 
+void __when_id_received(zuuid_t **udata, rope_wire *wire, zuuid_t *uuid){
+    *udata = zuuid_dup(uuid);
+}
+
+void __when_id_requested(zuuid_t *udata, rope_wire *wire, zuuid_t **uuid){
+    *uuid = zuuid_dup(udata);
+}
+
 TEST(rope_wire, p2p_wire){
+    int ret;
     rwtp_frame *netkey = rwtp_frame_gen_network_key();
     rope_wire *alice = rope_wire_new_bind(strdup("tcp://127.0.0.1:!"), ROPE_SOCK_P2P, rwtp_frame_clone(netkey));
     rope_wire *bob = rope_wire_new_connect(strdup(alice->address), ROPE_SOCK_P2P, rwtp_frame_clone(netkey));
@@ -44,6 +53,40 @@ TEST(rope_wire, p2p_wire){
     rope_wire_zpoller_add(alice, poller);
     rope_wire_zpoller_add(bob, poller);
 
+    zuuid_t *alice_id = zuuid_new();
+    zuuid_t *bob_id = zuuid_new();
+    ret = rope_cb_table_set_callback_q(
+        &alice->callbacks,
+        ROPE_WIRE_EV_REMOTE_ID_REQUESTED,
+        (rope_wire_on_remote_id_requested)&__when_id_requested,
+        alice_id
+    );
+    REQUIRE_EQ(ret, 0);
+    ret = rope_cb_table_set_callback_q(
+        &bob->callbacks,
+        ROPE_WIRE_EV_REMOTE_ID_REQUESTED,
+        (rope_wire_on_remote_id_requested)&__when_id_requested,
+        bob_id
+    );
+    REQUIRE_EQ(ret, 0);
+
+    zuuid_t *received_alice_id = NULL;
+    zuuid_t *received_bob_id = NULL;
+    ret = rope_cb_table_set_callback_q(
+        &alice->callbacks,
+        ROPE_WIRE_EV_REMOTE_ID_CHANGED,
+        (rope_wire_on_remote_id_changed)&__when_id_received,
+        &received_bob_id
+    );
+    REQUIRE_EQ(ret, 0);
+    ret = rope_cb_table_set_callback_q(
+        &bob->callbacks,
+        ROPE_WIRE_EV_REMOTE_ID_CHANGED,
+        (rope_wire_on_remote_id_changed)&__when_id_received,
+        &received_alice_id
+    );
+    REQUIRE_EQ(ret, 0);
+
     rope_wire_start_handshake(alice, false);
 
     while (!(rope_wire_is_handshake_completed(alice) && rope_wire_is_handshake_completed(bob))){
@@ -51,7 +94,18 @@ TEST(rope_wire, p2p_wire){
         if (sock == alice->sock || sock == (zsock_t *)alice->monitor){
             rwtp_frame *user_message = rope_wire_recv_advanced(alice, sock);
             REQUIRE(!user_message);
-        } else {
+        } else if (sock == bob->sock || sock == (zsock_t *)bob->monitor) {
+            rwtp_frame *user_message = rope_wire_recv_advanced(bob, sock);
+            REQUIRE(!user_message);
+        }
+    }
+    
+    while (!(received_alice_id && received_bob_id)){
+        zsock_t *sock = zpoller_wait(poller, -1);
+        if (sock == alice->sock || sock == (zsock_t *)alice->monitor){
+            rwtp_frame *user_message = rope_wire_recv_advanced(alice, sock);
+            REQUIRE(!user_message);
+        } else if (sock == bob->sock || sock == (zsock_t *)bob->monitor) {
             rwtp_frame *user_message = rope_wire_recv_advanced(bob, sock);
             REQUIRE(!user_message);
         }
@@ -63,6 +117,10 @@ TEST(rope_wire, p2p_wire){
     REQUIRE_STREQ((char *)recevied->iovec_data, (char *)hellof.iovec_data);
     rwtp_frame_destroy(recevied);
 
+    zuuid_destroy(&alice_id);
+    zuuid_destroy(&bob_id);
+    zuuid_destroy(&received_alice_id);
+    zuuid_destroy(&received_bob_id);
     zpoller_destroy(&poller);
     rope_wire_destroy(alice);
     rope_wire_destroy(bob);
@@ -79,7 +137,7 @@ void increment_callback(void *udata, char *arg0){
 TEST(rope_cb_table, can_correctly_callback_funtions){
     int called_times = 0;
     rope_cb_table table = rope_cb_table_init();
-    
+
     rope_cb_table_set_callback_q(&table, "test0", &increment_callback, &called_times);
     rope_cb_table_set_callback_q(&table, "test0", &increment_callback, &called_times);
     rope_cb_table_call(&table, "test0", increment_callback_fn, "Hello!");
