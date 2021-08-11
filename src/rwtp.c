@@ -240,16 +240,32 @@ rwtp_frame *rwtp_frames_chain(rwtp_frame frames[], size_t frames_n) {
     return frames;
 }
 
+static void __rwtp_session_pkm_exact_nonce(rwtp_frame *nonce, unsigned char **decrypt_nonce, unsigned char **encrypt_nonce, size_t *nonce_length){
+    assert(nonce->iovec_len == (crypto_box_NONCEBYTES*2));
+    if (decrypt_nonce) *decrypt_nonce = nonce->iovec_data;
+    if (encrypt_nonce) *encrypt_nonce = nonce->iovec_data + crypto_box_NONCEBYTES;
+    if (nonce_length) *nonce_length = crypto_box_NONCEBYTES;
+}
+
 static rwtp_frame *rwtp_session_pkm_encrypt_single(const rwtp_session *self,
                                                    const rwtp_frame *f) {
+    size_t nonce_len = 0;
+    unsigned char *encrypt_nonce = NULL;
+    __rwtp_session_pkm_exact_nonce(self->nonce_or_header, NULL, &encrypt_nonce, &nonce_len);
+    rwtp_frame encrypt_noncef = {
+        .iovec_data = (void *)encrypt_nonce,
+        .iovec_len = nonce_len,
+        .frame_next = NULL,
+    };
     rwtp_crypto_save csave = {
         .pk = self->remote_public_key,
         .sk = self->self_private_key,
-        .nonce = self->nonce_or_header,
+        .nonce = &encrypt_noncef,
     };
     rwtp_frame *result = rwtp_frame_encrypt_single(f, &csave);
-    sodium_increment(self->nonce_or_header->iovec_data,
-                     self->nonce_or_header->iovec_len);
+    if (result){
+        sodium_increment(encrypt_nonce, nonce_len);
+    }
     return result;
 }
 
@@ -288,14 +304,21 @@ static rwtp_frame *rwtp_session_encrypt_single(const rwtp_session *self,
 static rwtp_frame *rwtp_session_decrypt_single(rwtp_session *self,
                                                const rwtp_frame *f) {
     if (rwtp_session_check_public_key_mode(self)) {
+        size_t nonce_len = 0;
+        unsigned char *decrypt_nonce = NULL;
+        __rwtp_session_pkm_exact_nonce(self->nonce_or_header, &decrypt_nonce, NULL, &nonce_len);
+        rwtp_frame decrypt_noncef = {
+            .iovec_data = (void *)decrypt_nonce,
+            .iovec_len = nonce_len,
+        };
         rwtp_crypto_save csave = {
             .pk = self->remote_public_key,
             .sk = self->self_private_key,
-            .nonce = self->nonce_or_header,
+            .nonce = &decrypt_noncef,
         };
         rwtp_frame *result = rwtp_frame_decrypt_single(f, &csave);
         if (result){
-            sodium_increment(self->nonce_or_header->iovec_data, self->nonce_or_header->iovec_len);
+            sodium_increment(decrypt_nonce, nonce_len);
         }
         return result;
     } else if (rwtp_session_check_secret_key_mode(self)) {
@@ -351,6 +374,18 @@ static void __rwtp_session_set_secret_key(rwtp_session *self, rwtp_frame *secret
     }
 }
 
+/* Swap 'encrypt' and 'decrypt' nonce. Always return 0. */
+static int __rwtp_session_pkm_swap_nonce(rwtp_frame *nonce, rwtp_frame *new_nonce){
+    assert(nonce->iovec_len==(crypto_box_NONCEBYTES*2));
+    assert(new_nonce->iovec_len == (crypto_box_NONCEBYTES*2));
+    unsigned char *original_decrypt, *original_encrypt, *new_decrypt, *new_encrypt;
+    __rwtp_session_pkm_exact_nonce(nonce, &original_decrypt, &original_encrypt, NULL);
+    __rwtp_session_pkm_exact_nonce(new_nonce, &new_decrypt, &new_encrypt, NULL);
+    memcpy(new_decrypt, original_encrypt, crypto_box_NONCEBYTES);
+    memcpy(new_encrypt, original_decrypt, crypto_box_NONCEBYTES);
+    return 0;
+}
+
 static rwtp_session_read_result rwtp_session_read_setopt(rwtp_session *self, rwtp_frame *frames){
     rwtp_frame *user_message = NULL;
     rwtp_frame *opt_key_frame = frames->frame_next;
@@ -364,12 +399,17 @@ static rwtp_session_read_result rwtp_session_read_setopt(rwtp_session *self, rwt
             !(ivf = pub_keyf->frame_next)) {
             return (struct rwtp_session_read_result){-3};
         } else if (pub_keyf->iovec_len != crypto_box_PUBLICKEYBYTES ||
-                   ivf->iovec_len != crypto_box_NONCEBYTES) {
+                   ivf->iovec_len != (crypto_box_NONCEBYTES*2)) {
             return (struct rwtp_session_read_result){-3};
         }
         pub_keyf = rwtp_frame_copy(pub_keyf, 1);
-        ivf = rwtp_frame_copy(ivf, 1);
-        __rwtp_session_set_public_key(self, pub_keyf, ivf);
+        rwtp_frame *new_iv = rwtp_frame_new(crypto_box_NONCEBYTES*2, NULL);
+        if (!new_iv){
+            rwtp_frame_destroy(pub_keyf);
+            return (struct rwtp_session_read_result){-4};
+        }
+        __rwtp_session_pkm_swap_nonce(ivf, new_iv);
+        __rwtp_session_set_public_key(self, pub_keyf, new_iv);
     } else if (opt_key == RWTP_OPTS_SECKEY && !self->remote_public_key) {
         rwtp_frame *sec_keyf, *headerf;
         if (!(sec_keyf = opt_key_frame->frame_next) ||
@@ -525,7 +565,7 @@ rwtp_frame *rwtp_session_send_set_pub_key(rwtp_session *self,
                                           rwtp_frame *iv) {
     assert(!rwtp_session_check_secret_key_mode(self)); // Should not in secret-key mode
     assert(self_private_key->iovec_len == crypto_box_SECRETKEYBYTES);
-    assert(iv->iovec_len == crypto_box_NONCEBYTES);
+    assert(iv->iovec_len == (crypto_box_NONCEBYTES * 2));
 
     unsigned char pk[crypto_box_PUBLICKEYBYTES];
     crypto_scalarmult_base(pk, self_private_key->iovec_data);
@@ -733,7 +773,7 @@ rwtp_frame *rwtp_frame_gen_secret_key(){
 }
 
 rwtp_frame *rwtp_frame_gen_public_key_mode_iv(){
-    rwtp_frame *result = rwtp_frame_new(crypto_box_NONCEBYTES, NULL);
+    rwtp_frame *result = rwtp_frame_new(crypto_box_NONCEBYTES*2, NULL);
     if (!result){
         return NULL;
     }

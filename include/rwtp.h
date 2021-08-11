@@ -179,7 +179,7 @@ typedef struct rwtp_session_read_result {
 /* Read raw_single message. Return a structure with infomation about user needed to do.
 * Assume result is a rwtp_session_read_result. result.status_code will be non-negative when operation successed,
 the number will be one of protocol control code: RWTP_DATA, RWTP_SETOPT, RWTP_ASKOPT.
-* result.status_code will be negative integer when error happens: -1: crypto error, -2: unknown control code, -3: bad message format.
+* result.status_code will be negative integer when error happens: -1: crypto error, -2: unknown control code, -3: bad message format, -4: memory error.
 * result.user_message will be:
 * - the pointer to message frames when status_code is RWTP_DATA,
 * - the pointer to last part of message when status_code is in the range of [RWTP_CTL_USER_START, RWTP_CTL_USER_END],

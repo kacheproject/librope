@@ -92,15 +92,12 @@ TEST(rwtp_session, rwtp_session_can_handshake_public_key_mode) {
     REQUIRE(bob.remote_public_key->iovec_len == crypto_box_PUBLICKEYBYTES);
     REQUIRE(alice.self_private_key->iovec_len == crypto_box_SECRETKEYBYTES);
     REQUIRE(alice.remote_public_key->iovec_len == crypto_box_PUBLICKEYBYTES);
-    REQUIRE(bob.nonce_or_header->iovec_len == crypto_box_NONCEBYTES);
-    REQUIRE(alice.nonce_or_header->iovec_len == crypto_box_NONCEBYTES);
     unsigned char alice_public_key[crypto_box_PUBLICKEYBYTES];
     crypto_scalarmult_base(alice_public_key, alice.self_private_key->iovec_data);
     unsigned char bob_public_key[crypto_box_PUBLICKEYBYTES];
     crypto_scalarmult_base(bob_public_key, bob.self_private_key->iovec_data);
     REQUIRE_BUF_EQ(alice.remote_public_key->iovec_data, bob_public_key, crypto_box_PUBLICKEYBYTES);
     REQUIRE_BUF_EQ(bob.remote_public_key->iovec_data, alice_public_key, crypto_box_PUBLICKEYBYTES);
-    REQUIRE_BUF_EQ(alice.nonce_or_header->iovec_data, bob.nonce_or_header->iovec_data, crypto_box_NONCEBYTES);
 
     rwtp_frame *bob_set_timef = rwtp_session_send_set_time(&bob, time(NULL)-1);
     /* In real world, the time should be as is. But I need to check if the 'time_offest' works. Though, well, rwtp doesn't care about that field. (Rubicon 29/Jul./2021) */
@@ -119,6 +116,25 @@ TEST(rwtp_session, rwtp_session_can_handshake_public_key_mode) {
     rwtp_frame_destroy(alice_set_timef);
     REQUIRE(bob_set_time_received.status_code == RWTP_SETOPT);
     REQUIRE(bob_set_time_received.opt == RWTP_OPTS_TIME);
+
+    const char *TEST_STR = "Hello";
+    rwtp_frame dataf = {.iovec_data=(char *)TEST_STR, .iovec_len=6, .frame_next=NULL};
+    rwtp_frame *encrypted_f = rwtp_session_send(&alice, &dataf);
+    rwtp_session_read_result result = rwtp_session_read(&bob, encrypted_f);
+    REQUIRE(result.status_code == RWTP_DATA);
+    CHECK_BUF_EQ(result.user_message->iovec_data, (void *)TEST_STR, result.user_message->iovec_len);
+    rwtp_frame_destroy(encrypted_f);
+    rwtp_frame_destroy(result.user_message);
+
+    const char *TEST_STR_2 = "Guten!";
+    rwtp_frame dataf_2 = {.iovec_data=(char *)TEST_STR_2, .iovec_len=6, .frame_next=NULL};
+    rwtp_frame *encrypted_f_2 = rwtp_session_send(&bob, &dataf_2);
+    rwtp_session_read_result result2 = rwtp_session_read(&alice, encrypted_f_2);
+    REQUIRE(result2.status_code == RWTP_DATA);
+    CHECK_BUF_EQ(result2.user_message->iovec_data, (void *)TEST_STR_2, result2.user_message->iovec_len);
+    rwtp_frame_destroy(encrypted_f_2);
+    rwtp_frame_destroy(result2.user_message);
+
     rwtp_session_deinit(&alice);
     rwtp_session_deinit(&bob);
 }
