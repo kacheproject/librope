@@ -26,6 +26,13 @@ pub fn build(b: *std.build.Builder) void {
     rope_object.addCSourceFile("src/rope.c", cflags[0..]);
     rope_object.addCSourceFile("src/rwtp_ext.c", cflags[0..]);
 
+    const libroke_static = b.addStaticLibrary("roke_static", "src/roke.zig");
+    libroke_static.addIncludeDir("include");
+    libroke_static.linkSystemLibrary("libuv");
+    libroke_static.linkSystemLibrary("zmq");
+    libroke_static.setBuildMode(mode);
+    libroke_static.install();
+
     const librwtp_static = b.addStaticLibrary("rwtp_static", null);
     librwtp_static.addIncludeDir("include");
     librwtp_static.addObject(rwtp_object);
@@ -95,11 +102,20 @@ pub fn build(b: *std.build.Builder) void {
     rwtp_test.install();
     const rwtp_test_run_step = rwtp_test.run();
 
+    const roke_test = b.addTest("src/roke.zig");
+    roke_test.addIncludeDir("include");
+    roke_test.linkSystemLibrary("libuv");
+    roke_test.linkSystemLibrary("zmq");
+
+    const uri_test = b.addTest("src/uri.zig");
+
     const rwtp_test_step = b.step("rwtp_test", "run test for rwtp");
     rwtp_test_step.dependOn(&rwtp_test.step);
     rwtp_test_step.dependOn(&rwtp_test_run_step.step);
     
     const step_test = b.step("test", "run all tests for rope and rwtp");
+    step_test.dependOn(&uri_test.step);
+    step_test.dependOn(&roke_test.step);
     step_test.dependOn(&rwtp_test.step);
     step_test.dependOn(&rope_test.step);
     step_test.dependOn(&rwtp_test_run_step.step);
