@@ -20,6 +20,7 @@ pub const Uri = struct {
     hostText: []const u8,
     portText: ?[]const u8,
     alloc: ?*Allocator,
+    selfInAllocator: bool = false,
 
     const Self = @This();
 
@@ -29,6 +30,9 @@ pub const Uri = struct {
             alloc.free(self.hostText);
             if (self.portText) |portText|{
                 alloc.free(portText);
+            }
+            if (self.selfInAllocator){
+                alloc.destroy(self);
             }
         }
     }
@@ -178,6 +182,39 @@ pub const Uri = struct {
     pub fn isDomain(self: *const Self) bool {
         return !(self.isIPv4() or self.isIPv6());
     }
+
+    pub fn dupe(self: *const Self, new_alloc: ?*Allocator) Allocator.Error!Self {
+        if (new_alloc) |alloc| {
+            var schemeText = try alloc.dupe(u8, self.schemeText);
+            errdefer alloc.free(schemeText);
+            var hostText = try alloc.dupe(u8, self.hostText);
+            errdefer alloc.free(hostText);
+            var portText = if(self.portText) |oldPortText| try alloc.dupe(u8, oldPortText) else null;
+            errdefer alloc.free(portText);
+            return Self {
+                .schemeText = schemeText,
+                .hostText = hostText,
+                .portText = portText,
+                .alloc = alloc,
+            };
+        } else {
+            return Self {
+                .schemeText = self.schemeText,
+                .hostText = self.hostText,
+                .portText = self.portText,
+                .alloc = self.alloc,
+            };
+        }
+    }
+
+    /// Copy the object and the strings refered into allocator's memory.
+    pub fn copyInto(self: *const Self, alloc: *Allocator) Allocator.Error!*Self {
+        var newObject = try self.dupe(alloc);
+        var newSelf = try alloc.create(Self);
+        newSelf.* = newObject;
+        newSelf.selfInAllocator = true;
+        return newSelf;
+    }
 };
 
 test "Uri.parse can parse simple uri strings" {
@@ -250,4 +287,32 @@ test "Uri.isIPv4, .isIPv6, .isDomain can identify type of host text" {
     try testing.expect(!uri2.isIPv4());
     try testing.expect(!uri2.isIPv6());
     try testing.expect(uri2.isDomain());
+}
+
+test "Uri.dupe can make copy on heap or on stack" {
+    const testing = std.testing;
+    const uri0 = try Uri.parse("wg://[unix:///dev/null]", null);
+    
+    var uri1 = uri0.dupe(null) catch return;
+    try testing.expect(uri0.schemeText.ptr == uri1.schemeText.ptr);
+    try testing.expect(uri0.hostText.ptr == uri1.hostText.ptr);
+
+    var uri2 = try uri0.dupe(testing.allocator);
+    try testing.expect(uri0.schemeText.ptr != uri2.schemeText.ptr);
+    try testing.expectEqualStrings(uri0.schemeText, uri2.schemeText);
+    try testing.expect(uri0.hostText.ptr != uri2.hostText.ptr);
+    try testing.expectEqualStrings(uri0.hostText, uri2.hostText);
+    uri2.deinit();
+}
+
+test "Uri.copyInto can copy whole object into allocator's memory" {
+    const testing = std.testing;
+    const uri0 = try Uri.parse("tcp://[unix:///dev/null]", null);
+    var uri2 = try uri0.copyInto(testing.allocator);
+    try testing.expect(uri0.schemeText.ptr != uri2.schemeText.ptr);
+    try testing.expectEqualStrings(uri0.schemeText, uri2.schemeText);
+    try testing.expect(uri0.hostText.ptr != uri2.hostText.ptr);
+    try testing.expectEqualStrings(uri0.hostText, uri2.hostText);
+    try testing.expect(uri2 != &uri0);
+    uri2.deinit();
 }
